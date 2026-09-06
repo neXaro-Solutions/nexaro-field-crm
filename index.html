@@ -38,8 +38,79 @@
 </section>
 
 <section id="area" class="screen">
-  <h2>Gebiet</h2><div class="card center"><div class="pin">📍</div><h3>15913 + 50 km</h3><p>Standort ermitteln und anschließend Leads über deine Karten-App ansteuern.</p><button class="primary" id="locate">📍 Standort ermitteln</button><small id="locStatus"></small></div>
-  <h3>Leads mit Adresse</h3><div id="areaList"></div>
+  <h2>Gebiet 🗺️</h2>
+
+  <div class="card">
+    <h3>📍 Ausgangspunkt</h3>
+
+    <button class="primary wide" id="locate">
+      📍 Meinen Live-Standort verwenden
+    </button>
+
+    <div class="row">
+      <input
+        id="areaPlz"
+        type="text"
+        inputmode="numeric"
+        maxlength="5"
+        placeholder="PLZ eingeben"
+      >
+
+      <select id="areaRadius">
+        <option value="2">2 km</option>
+        <option value="5" selected>5 km</option>
+        <option value="10">10 km</option>
+        <option value="20">20 km</option>
+        <option value="30">30 km</option>
+      </select>
+    </div>
+
+    <div id="areaLocationStatus" class="info">
+      Noch kein Standort ausgewählt.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🏪 Zielunternehmen</h3>
+
+    <select id="areaIndustry">
+      <option value="all">Alle Branchen</option>
+      <option value="bakery">Bäckereien</option>
+      <option value="beverage">Getränkemärkte</option>
+      <option value="retail">Einzelhandel</option>
+      <option value="gastronomy">Gastronomie</option>
+      <option value="hairdresser">Friseure</option>
+      <option value="craft">Handwerk</option>
+      <option value="kiosk">Kioske / Spätis</option>
+      <option value="fuel">Tankstellen</option>
+    </select>
+
+    <button class="primary wide" id="areaSearch">
+      🔎 Unternehmen in diesem Gebiet suchen
+    </button>
+  </div>
+
+  <div class="card">
+    <h3>🎯 Potenzielle Unternehmen</h3>
+
+    <div id="areaSearchStatus" class="info">
+      Noch keine Suche durchgeführt.
+    </div>
+
+    <div id="areaList"></div>
+  </div>
+
+  <div class="card">
+    <h3>🗺️ Besuchsroute</h3>
+
+    <div id="routeList" class="info">
+      Noch keine Route geplant.
+    </div>
+
+    <button class="primary wide" id="optimizeRoute">
+      🚗 Route automatisch optimieren
+    </button>
+  </div>
 </section>
 
 <section id="tasks" class="screen"><h2>Follow-ups</h2><div id="taskList"></div></section>
