@@ -1,4 +1,4 @@
-const CACHE='nexaro-crm-v5.1';
+const CACHE='nexaro-crm-v5-2';
 
 const ASSETS=[
   './',
