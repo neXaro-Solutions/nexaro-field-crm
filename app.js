@@ -352,3 +352,409 @@ $('restore').onchange=e=>{const r=new FileReader();r.onload=()=>{try{S=JSON.pars
 $('demo').onclick=()=>{S.leads=[['Späti am Markt','Kiosk / Späti','neu','Halbe, Brandenburg','Solo','Heute anrufen'],['Getränke & Mehr','Getränkemarkt','kontaktiert','Lübben','Terminal','Mittwoch nachfassen'],['Mode & Alltag','Einzelhandel','termin','Luckau','Kassensystem / POS','Beratung vorbereiten']].map(x=>({id:uid(),company:x[0],industry:x[1],status:x[2],address:x[3],product:x[4],next:x[5],priority:'Hoch',due:new Date().toISOString().slice(0,10),notes:''}));save()};
 $('clear').onclick=()=>{if(confirm('Alle lokalen CRM-Daten löschen?')){S={leads:[]};save()}};
 render();renderAssistant();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+/* =========================
+   neXaro Gebiet V2
+   Standort + PLZ + Radius
+   Unternehmen + Lead + Route
+   ========================= */
+
+let areaOrigin=null;
+let areaResults=[];
+
+const areaIndustryTags={
+  all:'[name]',
+  bakery:'[shop=bakery]',
+  beverage:'[shop=beverages]',
+  retail:'[shop]',
+  gastronomy:'[amenity~"restaurant|cafe|bar|fast_food"]',
+  hairdresser:'[shop=hairdresser]',
+  craft:'[craft]',
+  kiosk:'[shop=convenience]',
+  fuel:'[amenity=fuel]'
+};
+
+function areaDistance(lat1,lon1,lat2,lon2){
+  const R=6371;
+  const p=Math.PI/180;
+  const a=
+    0.5-Math.cos((lat2-lat1)*p)/2+
+    Math.cos(lat1*p)*Math.cos(lat2*p)*
+    (1-Math.cos((lon2-lon1)*p))/2;
+  return R*2*Math.asin(Math.sqrt(a));
+}
+
+function areaStatus(text){
+  const el=$('areaSearchStatus');
+  if(el)el.textContent=text;
+}
+
+function areaLocationStatus(text){
+  const el=$('areaLocationStatus');
+  if(el)el.textContent=text;
+}
+
+function setAreaOrigin(lat,lon,label){
+  areaOrigin={lat:Number(lat),lon:Number(lon),label};
+  areaLocationStatus('📍 '+label+' · '+Number(lat).toFixed(5)+', '+Number(lon).toFixed(5));
+}
+
+async function areaGeocodePLZ(plz){
+  const url=
+    'https://nominatim.openstreetmap.org/search?format=jsonv2&country=Deutschland&postalcode='+
+    encodeURIComponent(plz)+'&limit=1';
+
+  const res=await fetch(url,{
+    headers:{'Accept':'application/json'}
+  });
+
+  if(!res.ok)throw new Error('PLZ-Suche fehlgeschlagen');
+
+  const data=await res.json();
+
+  if(!data.length)throw new Error('PLZ nicht gefunden');
+
+  return data[0];
+}
+
+async function areaSearchCompanies(){
+  if(!areaOrigin){
+    alert('Bitte zuerst Live-Standort verwenden oder eine PLZ eingeben.');
+    return;
+  }
+
+  const radiusKm=Number($('areaRadius')?.value||5);
+  const industry=$('areaIndustry')?.value||'all';
+  const radius=Math.round(radiusKm*1000);
+
+  areaStatus('🔎 Suche Unternehmen im Umkreis von '+radiusKm+' km ...');
+
+  const tag=areaIndustryTags[industry]||'[name]';
+
+  const query=
+`[out:json][timeout:30];
+(
+  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})${tag};
+);
+out center tags;`;
+
+  try{
+    const res=await fetch(
+      'https://overpass-api.de/api/interpreter',
+      {
+        method:'POST',
+        body:query
+      }
+    );
+
+    if(!res.ok)throw new Error('Unternehmenssuche fehlgeschlagen');
+
+    const data=await res.json();
+
+    areaResults=(data.elements||[])
+      .map(x=>{
+        const lat=x.lat??x.center?.lat;
+        const lon=x.lon??x.center?.lon;
+        const name=x.tags?.name;
+
+        if(!lat||!lon||!name)return null;
+
+        const distance=areaDistance(
+          areaOrigin.lat,
+          areaOrigin.lon,
+          lat,
+          lon
+        );
+
+        const existing=S.leads.find(l=>
+          String(l.company||'').toLowerCase()===
+          String(name).toLowerCase()
+        );
+
+        let score=100-Math.min(45,distance*7);
+
+        if(existing)score-=30;
+
+        return{
+          id:String(x.type)+'_'+String(x.id),
+          name,
+          lat:Number(lat),
+          lon:Number(lon),
+          distance,
+          score:Math.max(20,Math.round(score)),
+          address:x.tags?.['addr:street']
+            ? (x.tags['addr:street']+' '+(x.tags['addr:housenumber']||''))
+            : '',
+          city:x.tags?.['addr:city']||'',
+          phone:x.tags?.phone||x.tags?.['contact:phone']||'',
+          website:x.tags?.website||'',
+          existing:!!existing
+        };
+      })
+      .filter(Boolean)
+      .sort((a,b)=>a.distance-b.distance)
+      .slice(0,50);
+
+    renderAreaResults();
+
+    areaStatus(
+      areaResults.length+
+      ' potenzielle Unternehmen gefunden.'
+    );
+
+  }catch(err){
+    console.error(err);
+    areaStatus('❌ Suche momentan nicht verfügbar.');
+    alert('Die Unternehmenssuche konnte gerade nicht durchgeführt werden. Bitte später erneut versuchen.');
+  }
+}
+
+function renderAreaResults(){
+  const el=$('areaList');
+  if(!el)return;
+
+  if(!areaResults.length){
+    el.innerHTML='<div class="info">Keine passenden Unternehmen gefunden.</div>';
+    return;
+  }
+
+  el.innerHTML=areaResults.map((x,i)=>`
+    <div class="card">
+      <strong>${esc(x.name)}</strong>
+      <div class="info">
+        📏 ${x.distance.toFixed(1)} km ·
+        🎯 Potenzial ${x.score}%
+      </div>
+      ${x.address||x.city
+        ? `<div class="info">📍 ${esc((x.address+' '+x.city).trim())}</div>`
+        : ''}
+      ${x.phone
+        ? `<div class="info">📞 ${esc(x.phone)}</div>`
+        : ''}
+      ${x.existing
+        ? `<div class="info">✓ Bereits im CRM</div>`
+        : `<button class="primary wide" onclick="areaAddLead(${i})">
+             ➕ Als Lead übernehmen
+           </button>`}
+      <button class="wide" onclick="areaAddRoute(${i})">
+        🗺️ Zur Route hinzufügen
+      </button>
+    </div>
+  `).join('');
+}
+
+window.areaAddLead=function(i){
+  const x=areaResults[i];
+  if(!x)return;
+
+  const exists=S.leads.find(l=>
+    String(l.company||'').toLowerCase()===
+    String(x.name).toLowerCase()
+  );
+
+  if(exists){
+    alert('Dieses Unternehmen ist bereits im CRM.');
+    return;
+  }
+
+  const lead={
+    id:uid(),
+    createdAt:new Date().toISOString(),
+    company:x.name,
+    industry:$('areaIndustry')?.value||'',
+    status:'Neu',
+    phone:x.phone||'',
+    address:x.address||'',
+    city:x.city||'',
+    website:x.website||'',
+    lat:x.lat,
+    lon:x.lon,
+    notes:'Gebiet V2 · Potenzial '+x.score+'%',
+    next:'Gebiet'
+  };
+
+  S.leads.unshift(lead);
+  save();
+  render();
+
+  x.existing=true;
+  renderAreaResults();
+
+  alert('Lead wurde ins CRM übernommen. ✅');
+};
+
+window.areaAddRoute=function(i){
+  const x=areaResults[i];
+  if(!x)return;
+
+  const key='nexaro-route-v6';
+  let route=JSON.parse(localStorage.getItem(key)||'[]');
+
+  if(!route.some(r=>r.id===x.id)){
+    route.push(x);
+    localStorage.setItem(key,JSON.stringify(route));
+  }
+
+  renderRoute();
+};
+
+function renderRoute(){
+  const el=$('routeList');
+  if(!el)return;
+
+  const route=JSON.parse(
+    localStorage.getItem('nexaro-route-v6')||'[]'
+  );
+
+  if(!route.length){
+    el.textContent='Noch keine Route geplant.';
+    return;
+  }
+
+  el.innerHTML=route.map((x,i)=>`
+    <div>
+      <strong>${i+1}. ${esc(x.name)}</strong>
+      <span class="info"> · ${x.distance.toFixed(1)} km</span>
+    </div>
+  `).join('');
+}
+
+function optimizeAreaRoute(){
+  if(!areaOrigin){
+    alert('Bitte zuerst einen Startpunkt auswählen.');
+    return;
+  }
+
+  const key='nexaro-route-v6';
+  let route=JSON.parse(localStorage.getItem(key)||'[]');
+
+  if(!route.length){
+    alert('Bitte zuerst Unternehmen zur Route hinzufügen.');
+    return;
+  }
+
+  /* Nearest-Neighbour-Heuristik:
+     jeweils den nächstgelegenen noch offenen Besuch wählen. */
+  const remaining=[...route];
+  const optimized=[];
+  let current={lat:areaOrigin.lat,lon:areaOrigin.lon};
+
+  while(remaining.length){
+    let bestIndex=0;
+    let bestDistance=Infinity;
+
+    remaining.forEach((x,i)=>{
+      const d=areaDistance(
+        current.lat,
+        current.lon,
+        x.lat,
+        x.lon
+      );
+
+      if(d<bestDistance){
+        bestDistance=d;
+        bestIndex=i;
+      }
+    });
+
+    const next=remaining.splice(bestIndex,1)[0];
+    optimized.push(next);
+    current=next;
+  }
+
+  localStorage.setItem(key,JSON.stringify(optimized));
+  renderRoute();
+
+  const origin=
+    encodeURIComponent(areaOrigin.lat+','+areaOrigin.lon);
+
+  const destination=
+    encodeURIComponent(
+      optimized[optimized.length-1].lat+','+
+      optimized[optimized.length-1].lon
+    );
+
+  const waypoints=optimized
+    .slice(0,-1)
+    .map(x=>x.lat+','+x.lon)
+    .join('|');
+
+  const url=
+    'https://www.google.com/maps/dir/?api=1'+
+    '&origin='+origin+
+    '&destination='+destination+
+    (waypoints
+      ? '&waypoints='+encodeURIComponent(waypoints)
+      : '')+
+    '&travelmode=driving';
+
+  const el=$('routeList');
+
+  if(el){
+    el.innerHTML+=`
+      <br>
+      <button class="primary wide"
+        onclick="window.open('${url}','_blank')">
+        🚗 Optimierte Route in Google Maps öffnen
+      </button>
+    `;
+  }
+}
+
+$('locate').onclick=()=>{
+  if(!navigator.geolocation){
+    alert('Dieser Browser unterstützt keine Standortbestimmung.');
+    return;
+  }
+
+  areaLocationStatus('📍 Standort wird ermittelt ...');
+
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      setAreaOrigin(
+        pos.coords.latitude,
+        pos.coords.longitude,
+        'Live-Standort'
+      );
+    },
+    ()=>{
+      areaLocationStatus('❌ Standort konnte nicht ermittelt werden.');
+      alert('Bitte den Standortzugriff für diese Website erlauben.');
+    },
+    {
+      enableHighAccuracy:true,
+      timeout:10000,
+      maximumAge:60000
+    }
+  );
+};
+
+$('areaSearch').onclick=areaSearchCompanies;
+
+$('areaPlz').onchange=async()=>{
+  const plz=$('areaPlz').value.trim();
+
+  if(!/^\d{5}$/.test(plz)){
+    areaLocationStatus('Bitte eine gültige 5-stellige PLZ eingeben.');
+    return;
+  }
+
+  areaLocationStatus('🔎 PLZ wird gesucht ...');
+
+  try{
+    const place=await areaGeocodePLZ(plz);
+
+    setAreaOrigin(
+      place.lat,
+      place.lon,
+      'PLZ '+plz
+    );
+
+  }catch(err){
+    areaLocationStatus('❌ PLZ nicht gefunden.');
+    alert('Diese PLZ konnte nicht gefunden werden.');
+  }
+};
+
+$('optimizeRoute').onclick=optimizeAreaRoute;
+
+renderRoute();
