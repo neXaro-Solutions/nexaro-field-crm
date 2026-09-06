@@ -1331,7 +1331,123 @@ assistantAction=function(a,v){
 
     return
   }
+/* ===== neXaro V5.1 · Kostenmatrix Tastatur-Fix ===== */
 
+function v51CostResultHtml(){
+
+  const c=calcCosts();
+
+  if(!c.t){
+    return `
+      <div class="tip">
+        Noch keine Kosten eingegeben – die Matrix rechnet sofort nach Eingabe.
+      </div>
+    `;
+  }
+
+  return `
+    <div class="tariff-grid">
+
+      <div>
+        <b>Aktuell</b>
+        <strong>${euro(c.current)}</strong>
+        <small>geschätzt / Monat</small>
+      </div>
+
+      <div>
+        <b>SumUp Umsatzbasiert</b>
+        <strong>${euro(c.payg)}</strong>
+        <small>1,39 %</small>
+      </div>
+
+      <div>
+        <b>SumUp Zahlungen Plus</b>
+        <strong>${euro(c.plus)}</strong>
+        <small>0,79 % + 19 €</small>
+      </div>
+
+      <div>
+        <b>Potenzial</b>
+        <strong>
+          ${c.saving>=0?'Ersparnis':'Mehrkosten'}
+          ${euro(Math.abs(c.saving))}
+        </strong>
+        <small>vs. passende SumUp-Option</small>
+      </div>
+
+    </div>
+  `;
+}
+
+function v51UpdateMatrix(){
+
+  const box=$('v5Matrix');
+
+  if(!box)return;
+
+  let result=$('v5CostResult');
+
+  if(!result){
+
+    const grids=box.querySelectorAll('.tariff-grid');
+
+    if(!grids.length)return;
+
+    result=document.createElement('div');
+
+    result.id='v5CostResult';
+
+    grids[0].insertAdjacentElement(
+      'afterend',
+      result
+    );
+  }
+
+  result.innerHTML=v51CostResultHtml();
+}
+
+function bindCostMatrix(){
+
+  const fields=[
+    'v5Turnover',
+    'v5Rate',
+    'v5Fixed',
+    'v5Other'
+  ];
+
+  fields.forEach(id=>{
+
+    const el=$(id);
+
+    if(!el)return;
+
+    el.oninput=()=>{
+
+      V5.calc.turnover=
+        $('v5Turnover')?.value||'';
+
+      V5.calc.currentRate=
+        $('v5Rate')?.value||'';
+
+      V5.calc.currentFixed=
+        $('v5Fixed')?.value||'';
+
+      V5.calc.currentOther=
+        $('v5Other')?.value||'';
+
+      /*
+       * Wichtig:
+       * Die Eingabefelder werden NICHT mehr neu aufgebaut.
+       * Dadurch bleibt die iPhone-Tastatur geöffnet.
+       */
+      v51UpdateMatrix();
+
+    };
+
+  });
+
+  v51UpdateMatrix();
+}
   _assistantAction(a,v);
 };
 
