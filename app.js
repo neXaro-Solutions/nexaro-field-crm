@@ -362,7 +362,7 @@ let areaOrigin=null;
 let areaResults=[];
 
 const areaIndustryTags={
-  all:'[name]',
+  all:'[name][shop]',
   bakery:'[shop=bakery]',
   beverage:'[shop=beverages]',
   retail:'[shop]',
@@ -431,7 +431,15 @@ async function areaSearchCompanies(){
   const tag=areaIndustryTags[industry]||'[name]';
 
   const query=
-`[out:json][timeout:30];
+industry==='all'
+? `[out:json][timeout:30];
+(
+  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["shop"];
+  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["craft"];
+  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["amenity"~"restaurant|cafe|bar|fast_food|fuel"];
+);
+out center tags;`
+: `[out:json][timeout:30];
 (
   nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})${tag};
 );
