@@ -724,3 +724,622 @@ renderAssistant();
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
+/* ===== neXaro V5 · Sales Coach + Kostenmatrix + Angebotsmail + Hardware-Rabatt ===== */
+const V5={
+  emailSubject:'Ihr individuelles SumUp-Angebot – neXaro Solutions',
+  calc:{turnover:'',currentRate:'',currentFixed:'',currentOther:''},
+  offer:{customer:'',email:'',note:'',discount:'0'}
+};
+
+function euro(n){
+  return new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(Number(n)||0)
+}
+
+function num(v){
+  return Math.max(0,Number(String(v??'').replace(',','.'))||0)
+}
+
+function hardwareBase(name){
+  const p=SUMUP.products.find(x=>x.name===name);
+  if(!p)return 0;
+  const m=p.price.match(/([0-9]+(?:[.,][0-9]+)?)/);
+  return m?num(m[1]):0
+}
+
+function hardwareDiscount(name){
+  return ['Kassenschublade','Handscanner','Epson-Drucker'].includes(name)
+    ?0
+    :Math.min(25,num(V5.offer.discount))
+}
+
+function hardwarePrice(name){
+  const base=hardwareBase(name),d=hardwareDiscount(name);
+  return base*(1-d/100)
+}
+
+function calcCosts(){
+  const t=num(V5.calc.turnover);
+  const r=num(V5.calc.currentRate)/100;
+  const fixed=num(V5.calc.currentFixed);
+  const other=num(V5.calc.currentOther);
+
+  const current=t*r+fixed+other;
+  const payg=t*0.0139;
+  const plus=t*0.0079+19;
+  const best=t>=3500?plus:payg;
+
+  return {
+    t,
+    current,
+    payg,
+    plus,
+    best,
+    saving:current-best
+  }
+}
+
+function costMatrixHtml(){
+  const c=calcCosts();
+  const has=c.t>0;
+
+  return `<div class="tariff-card" id="v5Matrix">
+    <div class="assistant-label">NE XARO · KOSTENMATRIX 🇩🇪</div>
+    <h3>Aktuelle Kosten vs. SumUp</h3>
+
+    <div class="tariff-grid">
+      <div>
+        <b>Kartenumsatz / Monat</b>
+        <input id="v5Turnover" inputmode="decimal"
+          value="${esc(V5.calc.turnover)}"
+          placeholder="z. B. 5000">
+      </div>
+
+      <div>
+        <b>Effektive aktuelle Transaktionsgebühr</b>
+        <input id="v5Rate" inputmode="decimal"
+          value="${esc(V5.calc.currentRate)}"
+          placeholder="z. B. 1,90">
+      </div>
+
+      <div>
+        <b>Aktuelle Monatsgebühr</b>
+        <input id="v5Fixed"
+          inputmode="decimal"
+          value="${esc(V5.calc.currentFixed)}"
+          placeholder="z. B. 15">
+      </div>
+
+      <div>
+        <b>Sonstige Monatskosten</b>
+        <input id="v5Other"
+          inputmode="decimal"
+          value="${esc(V5.calc.currentOther)}"
+          placeholder="z. B. 5">
+      </div>
+    </div>
+
+    ${has?`
+    <div class="tariff-grid" style="margin-top:12px">
+
+      <div>
+        <b>Aktuell</b>
+        <strong>${euro(c.current)}</strong>
+        <small>geschätzt / Monat</small>
+      </div>
+
+      <div>
+        <b>SumUp Umsatzbasiert</b>
+        <strong>${euro(c.payg)}</strong>
+        <small>1,39 %</small>
+      </div>
+
+      <div>
+        <b>SumUp Zahlungen Plus</b>
+        <strong>${euro(c.plus)}</strong>
+        <small>0,79 % + 19 €</small>
+      </div>
+
+      <div>
+        <b>Potenzial</b>
+        <strong>
+          ${c.saving>=0?'Ersparnis':'Mehrkosten'}
+          ${euro(Math.abs(c.saving))}
+        </strong>
+        <small>vs. passende SumUp-Option</small>
+      </div>
+
+    </div>
+    `:`
+    <div class="tip" style="margin-top:12px">
+      Noch keine Kosten eingegeben – die Matrix rechnet sofort nach Eingabe.
+    </div>
+    `}
+
+    <p class="meta">
+      Schätzung auf Basis der eingegebenen aktuellen Kosten.
+      Bei gemischten Kartenarten oder Sonderkonditionen kann das tatsächliche
+      Ergebnis abweichen. Für die Vergleichsanzeige wird Zahlungen Plus ab
+      3.500 € monatlichem Zahlungsvolumen als passende Option berücksichtigt.
+    </p>
+
+    <a class="official-link"
+      href="${SUMUP.pricesUrl}"
+      target="_blank"
+      rel="noopener">
+      ↗ Deutsche SumUp-Preise prüfen
+    </a>
+
+  </div>`
+}
+
+function bindCostMatrix(){
+  ['v5Turnover','v5Rate','v5Fixed','v5Other'].forEach(id=>{
+    const el=$(id);
+    if(!el)return;
+
+    el.oninput=()=>{
+      V5.calc.turnover=$('v5Turnover').value;
+      V5.calc.currentRate=$('v5Rate').value;
+      V5.calc.currentFixed=$('v5Fixed').value;
+      V5.calc.currentOther=$('v5Other').value;
+
+      const box=$('v5Matrix');
+
+      if(box){
+        box.outerHTML=costMatrixHtml();
+        bindCostMatrix()
+      }
+    }
+  })
+}
+
+function coachHtml(){
+  const q=nextQuestion();
+  const p=recommendedProduct();
+
+  const scripts={
+    Mobilität:
+      '„Wenn Sie auch unterwegs kassieren, würde ich genau auf die mobile Nutzung eingehen. Entscheidend ist, dass Sie nicht an einen festen Kassenplatz gebunden sind.“',
+
+    Kosten:
+      '„Lassen Sie uns nicht über ein Bauchgefühl sprechen. Wir rechnen Ihre heutigen Kosten einmal konkret gegen die SumUp-Konditionen.“',
+
+    Geschwindigkeit:
+      '„Wenn Geschwindigkeit Ihr Thema ist, sprechen wir über den Ablauf pro Zahlung und die Situation zu Stoßzeiten.“',
+
+    Bedienung:
+      '„Dann schauen wir uns nicht zehn Funktionen an, sondern genau den Ablauf, der Sie heute Zeit kostet.“',
+
+    Technik:
+      '„Dann würde ich zuerst klären, wann die Technik Probleme macht und welche Situation die Lösung konkret entschärfen soll.“'
+  };
+
+  return `<div class="product-card">
+
+    <div>
+      <b>Sales Coach · Nächste Formulierung</b>
+
+      <div class="script">
+        ${esc(
+          scripts[A.pain]||
+          '„Lassen Sie uns genau den Punkt anschauen, der Sie heute am meisten stört.“'
+        )}
+      </div>
+
+      <div class="meta">
+        <b>Nächste Frage:</b> ${esc(q)}
+      </div>
+    </div>
+
+    <strong>${esc(p)}</strong>
+
+  </div>`
+}
+
+function step3(){
+
+  let body='';
+
+  if(A.solution==='Keine Kartenzahlung'){
+
+    body=`
+      <div class="question">Frage:</div>
+
+      <div class="script">
+        Darf ich fragen, warum Sie aktuell keine Kartenzahlung anbieten?
+      </div>
+
+      <div class="choice-grid">
+
+        ${[
+          'Kunden zahlen bar',
+          'Gebühren zu hoch',
+          'Kein Bedarf',
+          'Bisher keine passende Lösung'
+        ].map(x=>
+          `<button class="choice"
+            data-a="pain"
+            data-v="${x}">
+            ${x}
+          </button>`
+        ).join('')}
+
+      </div>`;
+
+  }else{
+
+    body=`
+      <div class="question">
+        Wie zufrieden ist der Betrieb mit der aktuellen Lösung?
+      </div>
+
+      <div class="choice-grid">
+
+        ${[
+          'Sehr zufrieden',
+          'Grundsätzlich zufrieden',
+          'Nicht zufrieden'
+        ].map(x=>
+          `<button class="choice"
+            data-a="satisfaction"
+            data-v="${x}">
+            ${x}
+          </button>`
+        ).join('')}
+
+      </div>`;
+  }
+
+  return `<div class="assistant-card">
+
+    <div class="assistant-label">
+      Schritt 3 · Problem & Priorität
+    </div>
+
+    <h3>
+      ${A.solution==='Keine Kartenzahlung'
+        ?'Grund herausfinden'
+        :'Zufriedenheit prüfen'}
+    </h3>
+
+    ${body}
+
+    ${A.satisfaction?`
+
+      <div class="question">
+        Nächste Frage:
+      </div>
+
+      <div class="script">
+        ${
+          A.satisfaction==='Nicht zufrieden'
+          ?'Was stört Sie denn momentan am meisten?'
+          :'Wenn Sie eine Sache sofort verbessern könnten – welche wäre das?'
+        }
+      </div>
+
+      <div class="choice-grid">
+
+        ${[
+          'Kosten',
+          'Vertrag / Bindung',
+          'Bedienung',
+          'Geschwindigkeit',
+          'Mobilität',
+          'Technik',
+          'Zahlungsarten',
+          'Auszahlung / Abrechnung',
+          'Support',
+          'Sonstiges'
+        ].map(x=>
+          `<button class="choice"
+            data-a="pain"
+            data-v="${x}">
+            ${x}
+          </button>`
+        ).join('')}
+
+      </div>
+
+    `:''}
+
+    ${A.pain?`
+
+      <div class="tip">
+        Bedarf erfasst:
+        <b>${esc(A.pain)}</b>
+      </div>
+
+      ${recommendationHtml()}
+
+      ${coachHtml()}
+
+      ${costMatrixHtml()}
+
+      <div class="assistant-actions">
+        <button class="primary" data-a="next3">
+          Einwand vorbereiten →
+        </button>
+      </div>
+
+    `:''}
+
+  </div>`
+}
+
+function offerHtml(){
+
+  const p=recommendedProduct();
+  const po=SUMUP.products.find(x=>x.name===p);
+
+  const d=hardwareDiscount(p);
+  const price=hardwarePrice(p);
+  const base=hardwareBase(p);
+
+  return `<div class="tariff-card" id="v5Offer">
+
+    <div class="assistant-label">
+      NE XARO · ANGEBOTSMODUS
+    </div>
+
+    <h3>
+      Angebot per E-Mail vorbereiten
+    </h3>
+
+    <div class="tariff-grid">
+
+      <div>
+        <b>Kundenname / Firma</b>
+
+        <input id="v5Customer"
+          value="${esc(V5.offer.customer||A.company)}"
+          placeholder="Name oder Firma">
+      </div>
+
+      <div>
+        <b>E-Mail des Kunden</b>
+
+        <input id="v5Email"
+          type="email"
+          value="${esc(V5.offer.email)}"
+          placeholder="kunde@beispiel.de">
+      </div>
+
+      <div>
+        <b>Hardware</b>
+
+        <select id="v5Product">
+
+          ${SUMUP.products.map(x=>
+            `<option ${x.name===p?'selected':''}>
+              ${esc(x.name)}
+            </option>`
+          ).join('')}
+
+        </select>
+      </div>
+
+      <div>
+        <b>Hardware-Rabatt</b>
+
+        <input id="v5Discount"
+          inputmode="decimal"
+          value="${esc(V5.offer.discount)}"
+          placeholder="0–25 %">
+      </div>
+
+    </div>
+
+    <div class="tip" style="margin-top:12px">
+
+      ${esc(po?.name||p)}:
+      <b>${euro(price)}</b>
+
+      nach ${d}% Rabatt
+
+      ${base?` · regulär ${euro(base)}`:''}.
+
+      Maximal 25 % auf rabattfähige SumUp-Hardware.
+
+      <b>
+        Ausgenommen: Kassenschublade, Handscanner und Epson-Drucker.
+      </b>
+
+    </div>
+
+    <label style="display:block;margin-top:12px">
+
+      <b>Persönliche Notiz</b>
+
+      <textarea id="v5Note"
+        rows="3"
+        placeholder="z. B. besprochenes Einsparpotenzial, nächster Schritt ...">${esc(V5.offer.note)}</textarea>
+
+    </label>
+
+    <div class="assistant-actions">
+
+      <button class="primary" data-a="sendOffer">
+        ✉️ Angebot in Mail öffnen
+      </button>
+
+    </div>
+
+    <p class="meta">
+      Die Mail wird vorbereitet und in der auf dem iPhone eingerichteten
+      Mail-App geöffnet. Du prüfst sie und tippst selbst auf „Senden“.
+    </p>
+
+  </div>`
+}
+
+function step5(){
+
+  return `<div class="assistant-card result">
+
+    <div class="assistant-label">
+      Schritt 5 · Abschluss & CRM
+    </div>
+
+    <h3>
+      Was ist der nächste Schritt?
+    </h3>
+
+    <div class="choice-grid">
+
+      ${[
+        'Abschluss heute',
+        'Rückruf vereinbaren',
+        'Termin vereinbaren',
+        'Unterlagen / Info senden',
+        'Entscheider kontaktieren',
+        'Kein Interesse'
+      ].map(x=>
+        `<button class="choice"
+          data-a="finish"
+          data-v="${x}">
+          ${x}
+        </button>`
+      ).join('')}
+
+    </div>
+
+    ${A.timing?`
+
+      <div class="saved">
+        ✓ ${esc(A.timing)}
+        ${A.saved?' · CRM gespeichert':''}
+      </div>
+
+      ${
+        ['Abschluss heute','Unterlagen / Info senden'].includes(A.timing)
+        ?offerHtml()
+        :''
+      }
+
+    `:''}
+
+    <div class="tip" style="margin-top:12px">
+
+      Abschlussformulierung:
+
+      „Nach dem, was Sie mir gerade erzählt haben, sehe ich bei Ihnen
+      grundsätzlich einen sinnvollen Ansatz. Lassen Sie uns das einmal
+      konkret durchgehen. Wenn es für Sie nicht passt, lassen wir es dabei.“
+
+    </div>
+
+  </div>`
+}
+
+const _assistantAction=assistantAction;
+
+assistantAction=function(a,v){
+
+  if(a==='sendOffer'){
+
+    const email=$('v5Email')?.value.trim();
+
+    const customer=
+      $('v5Customer')?.value.trim()||
+      A.company||
+      'Ihr Ansprechpartner';
+
+    const note=
+      $('v5Note')?.value.trim()||
+      'Vielen Dank für das Gespräch.';
+
+    if($('v5Discount'))
+      V5.offer.discount=$('v5Discount').value;
+
+    if($('v5Product'))
+      V5.offer.product=$('v5Product').value;
+
+    if(!email){
+
+      alert(
+        'Bitte zuerst die E-Mail-Adresse des Kunden eingeben.'
+      );
+
+      return
+    }
+
+    V5.offer.customer=customer;
+    V5.offer.email=email;
+    V5.offer.note=note;
+
+    const p=
+      V5.offer.product||
+      recommendedProduct();
+
+    const d=hardwareDiscount(p);
+    const price=hardwarePrice(p);
+    const c=calcCosts();
+
+    const body=[
+
+      `Hallo ${customer},`,
+
+      '',
+
+      'vielen Dank für das Gespräch.',
+
+      '',
+
+      'Wie besprochen, hier die Eckdaten Ihres individuellen SumUp-Angebots über neXaro Solutions:',
+
+      '',
+
+      `Empfohlene Hardware: ${p}`,
+
+      `Hardwarepreis nach ${d}% Rabatt: ${euro(price)}`,
+
+      d>0
+        ?'Hinweis: Der Hardware-Rabatt gilt bis maximal 25 % für rabattfähige Hardware. Kassenschublade, Handscanner und Epson-Drucker sind ausgenommen.'
+        :'Hinweis: Hardware-Rabatt aktuell mit 0 % kalkuliert. Ausgenommen von einem Hardware-Rabatt sind Kassenschublade, Handscanner und Epson-Drucker.',
+
+      '',
+
+      'SumUp Deutschland:',
+
+      'Umsatzbasiert: 1,39 % pro Zahlung, 0 € monatliche Grundgebühr.',
+
+      'Zahlungen Plus: 0,79 % für passende Vor-Ort-Zahlungen, 19 € pro Monat bzw. 199 € pro Jahr.',
+
+      c.t>0
+        ?`Kostenvergleich auf Basis Ihrer Angaben: aktuell ca. ${euro(c.current)} / Monat · passende SumUp-Option ca. ${euro(c.best)} / Monat · Potenzial ca. ${euro(Math.max(0,c.saving))} / Monat.`
+        :'Kostenvergleich: Noch keine aktuellen Kosten eingegeben.',
+
+      '',
+
+      note,
+
+      '',
+
+      'Die finalen Konditionen richten sich nach dem aktuellen SumUp-Angebot und den jeweiligen Zahlungsarten.',
+
+      '',
+
+      'Viele Grüße',
+
+      'neXaro Solutions'
+
+    ].join('\n');
+
+    window.location.href=
+      `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(V5.emailSubject)}&body=${encodeURIComponent(body)}`;
+
+    return
+  }
+
+  _assistantAction(a,v);
+};
+
+const _renderAssistant=renderAssistant;
+
+renderAssistant=function(){
+  _renderAssistant();
+  setTimeout(bindCostMatrix,0)
+};
+
+renderAssistant();
