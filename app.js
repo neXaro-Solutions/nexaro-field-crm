@@ -520,7 +520,7 @@ function assistantAction(a,v){
   
   if(a==='solution'){A.solution=v;A.step=3}
   if(a==='satisfaction'){A.satisfaction=v}
-  if(a==='pain'){A.pain=v}
+  if(a==='pain'){A.pain=v;A.step=4}
   if(a==='calcCosts'){readCostFields()}
   if(a==='next3')A.step=4
   if(a==='tpv'){A.tpv=v;A.step=5}
