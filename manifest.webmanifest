@@ -1,1 +1,10 @@
-{"name":"neXaro Field CRM","short_name":"neXaro CRM","start_url":".","display":"standalone","background_color":"#f5f7fa","theme_color":"#111827","description":"Mobile Field CRM für neXaro Solutions"}
+{
+  "name":"neXaro Field CRM V7",
+  "short_name":"neXaro CRM",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#f4f7fa",
+  "theme_color":"#101a2d",
+  "lang":"de",
+  "description":"Mobile-first CRM für den Außendienst von neXaro Solutions"
+}

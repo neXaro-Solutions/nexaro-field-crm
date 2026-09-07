@@ -1,979 +1,233 @@
-const KEY='nexaro-crm-v5-2';
-let S=JSON.parse(localStorage.getItem(KEY)||localStorage.getItem('nexaro-crm-v4')||localStorage.getItem('nexaro-crm-v3')||localStorage.getItem('nexaro-crm-v2')||localStorage.getItem('nexaro-crm-v1')||'{"leads":[]}');
-let filter='all';
-const $=x=>document.getElementById(x);
-const esc=x=>String(x||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-const save=()=>{localStorage.setItem(KEY,JSON.stringify(S));render()};
-const status=x=>({neu:'Neu',kontaktiert:'Kontaktiert',qualifiziert:'Qualifiziert',termin:'Termin',angebot:'Angebot',gewonnen:'Gewonnen',verloren:'Verloren'}[x]||x);
+const $=id=>document.getElementById(id);
+const KEY="nexaro-field-crm-v7-data";
+const INTERNAL_KEY="nexaro-field-crm-v7-internal";
 
-const A={step:1,industry:'',solution:'',satisfaction:'',pain:'',objection:'',decision:'',timing:'',company:'',leadId:'',saved:false};
+const PRODUCTS=[
+ {id:"tap",name:"Tap to Pay",price:0,kind:"mobile",fit:"Für mobile Verkäufer und Betriebe, die direkt per Smartphone kassieren möchten."},
+ {id:"solo-lite",name:"Solo Lite",price:34,kind:"terminal",fit:"Kompaktes Kartenlesegerät für einfache mobile Kartenzahlung."},
+ {id:"solo",name:"Solo",price:79,kind:"terminal",fit:"Eigenständiges mobiles Terminal für regelmäßige Kartenzahlungen."},
+ {id:"terminal",name:"Terminal",price:169,kind:"terminal",fit:"Stationäres, größeres Gerät für hohe Frequenz und Kassenbetrieb."},
+ {id:"pos",name:"Kassensystem / POS",price:0,kind:"software",fit:"Für Betriebe mit umfangreicherem Kassen-, Artikel- und Team-Bedarf."}
+];
+const TARIFFS=[
+ {id:"payg",name:"Umsatzbasiertes Zahlen",fee:.0139,monthly:0},
+ {id:"plus",name:"Zahlungen Plus",fee:.0079,monthly:19}
+];
+const state=load();
+let leadFilter="all", areaOrigin=null, areaCandidates=[], route=[];
+let assistant={step:1,company:"",industry:"",solution:"",satisfaction:"",pain:"",tpv:0,objection:"",timing:""};
 
-const SUMUP={
-  country:'DE',market:'Deutschland',locale:'de-DE',sourceDomain:'sumup.com/de-de',
-  verified:'06.09.2026',
-  pricesUrl:'https://www.sumup.com/de-de/preise/',
-  productsUrl:'https://www.sumup.com/de-de/kartenterminals/',
-  payg:{monthly:'0 €',rate:'1,39 %',note:'Umsatzbasiertes Zahlen; keine monatliche Grundgebühr.'},
-  plus:{monthly:'19 €',yearly:'199 €',rate:'0,79 %',note:'Für Vor-Ort-Zahlungen mit inländischen/EWR-Verbraucherkarten; andere Karten können 1,39 % kosten.'},
-  products:[
-    {name:'Tap to Pay',price:'0 € Hardware',fit:'Kontaktlose Zahlungen direkt mit kompatiblem Smartphone',url:'https://www.sumup.com/de-de/tap-to-pay/'},
-    {name:'Solo Lite',price:'34 €*',fit:'Kompaktes Kartenlesegerät, mit Smartphone gekoppelt',url:'https://www.sumup.com/de-de/solo-lite-kartenterminal/'},
-    {name:'Solo',price:'79 €*',fit:'Eigenständiges Kartenterminal für mobile und stationäre Nutzung',url:'https://www.sumup.com/de-de/solo-kartenlesegeraet/'},
-    {name:'Terminal',price:'169 €*',fit:'Eigenständiges All-in-one-Gerät mit Bestell- und Kassenfunktionen',url:'https://www.sumup.com/de-de/terminal-kartenterminal/'}
-  ]
-};
-const COMMISSION={
-  partner:{
-    paymentsShare:0.50,
-    hardwareShare:0.50,
-    softwareShare:0.50,
-    residualShare:0.20
-  },
-  agent:{
-    paymentsShare:0.40,
-    hardwareShare:0.40,
-    softwareShare:0.40,
-    residualShare:0
-  },
+function load(){try{return JSON.parse(localStorage.getItem(KEY))||{leads:[],tasks:[]}}catch{return{leads:[],tasks:[]}}}
+function save(){localStorage.setItem(KEY,JSON.stringify(state));renderAll()}
+function loadInternal(){try{return JSON.parse(localStorage.getItem(INTERNAL_KEY))||{profile:"partner",netMargin:.007}}catch{return{profile:"partner",netMargin:.007}}}
+function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function money(v){return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(Number(v)||0)}
+function today(){return new Date().toISOString().slice(0,10)}
+function go(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));document.querySelectorAll(".bottom-nav [data-go]").forEach(b=>b.classList.toggle("active",b.dataset.go===id));if(id==="assistant")renderAssistant();if(id==="more")renderMore()}
 
-  activationBonus:200,
-  activationTpv:500,
+document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
+$("newLead").onclick=()=>openLead();
+$("leadSearch").oninput=renderLeads;
+document.querySelectorAll("#leadFilters .chip").forEach(b=>b.onclick=()=>{leadFilter=b.dataset.filter;document.querySelectorAll("#leadFilters .chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");renderLeads()});
+$("resetAssistant").onclick=()=>{assistant={step:1,company:"",industry:"",solution:"",satisfaction:"",pain:"",tpv:0,objection:"",timing:""};renderAssistant()};
+$("useLocation").onclick=useLocation;
+$("searchArea").onclick=searchArea;
+$("optimizeRoute").onclick=optimizeRoute;
+$("openMaps").onclick=openMaps;
+$("newTask").onclick=()=>openTask();
+$("exportJson").onclick=()=>download("nexaro-field-crm-v7-backup.json",JSON.stringify(state,null,2),"application/json");
+$("exportCsv").onclick=exportCsv;
+$("restoreJson").onchange=restoreJson;
+$("demoData").onclick=demoData;
+$("clearData").onclick=()=>{if(confirm("Alle lokalen CRM-Daten löschen?")){state.leads=[];state.tasks=[];save()}};
+document.querySelectorAll(".menu-grid [data-panel]").forEach(b=>b.onclick=()=>renderMore(b.dataset.panel));
+$("closeModal").onclick=closeModal;
+$("installBtn").onclick=()=>{if(window.deferredInstall)window.deferredInstall.prompt();else alert("Auf iPhone: Teilen → Zum Home-Bildschirm.");};
+let deferredInstall=null;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;window.deferredInstall=e});
 
-  partnerBonusMonthly:150,
-
-  hardwareBonusShare:0.50,
-  softwareBonusShare:0.50,
-
-  contractsBonus:100,
-  posActivationBonus:100,
-
-  tpvMasterBonus:100,
-  tpvMasterThreshold:15000,
-
-  kassensystemChampionBonus:100,
-
-  residualMonths:24,
-
-  defaultNetMargin:0.007
-};
-function calculateCommission(){
-  const tpv=Number($('monthlyTpv')?.value||$('expectedTpv')?.value||0);
-  const terminals=Number($('terminalCount')?.value||1);
-  const users=Number($('users')?.value||1);
-  const needsPos=$('needsPos')?.value==='ja';
-  const needsSoftware=$('needsSoftware')?.value==='ja';
-
-  const paymentsCommission=
-    tpv*COMMISSION.defaultNetMargin*12*COMMISSION.partner.paymentsShare;
-
-  const activation=
-    tpv>=COMMISSION.activationTpv
-    ? COMMISSION.activationBonus
-    : 0;
-
-  const hardwareCommission=
-    terminals*COMMISSION.hardwareBonusShare*169;
-
-  const softwareCommission=
-    needsSoftware
-    ? 49*12*COMMISSION.softwareBonusShare
-    : 0;
-
-  const bonuses=
-    (needsPos?COMMISSION.posActivationBonus:0)+
-    (needsSoftware?COMMISSION.contractsBonus:0)+
-    (tpv>=COMMISSION.tpvMasterThreshold?COMMISSION.tpvMasterBonus:0)+
-    (needsSoftware&&tpv>=COMMISSION.tpvMasterThreshold
-      ?COMMISSION.kassensystemChampionBonus
-      :0);
-
-  const residual=
-    tpv*COMMISSION.defaultNetMargin*
-    COMMISSION.partner.residualShare;
-
-  const totalImmediate=
-    paymentsCommission+
-    activation+
-    hardwareCommission+
-    softwareCommission+
-    bonuses;
-
-  return{
-    tpv,
-    terminals,
-    users,
-    needsPos,
-    needsSoftware,
-    paymentsCommission,
-    activation,
-    hardwareCommission,
-    softwareCommission,
-    bonuses,
-    residual,
-    totalImmediate
-  };
+function renderAll(){renderDashboard();renderLeads();renderTasks();renderMore()}
+function renderDashboard(){
+ $("kLeads").textContent=state.leads.filter(l=>l.status!=="gewonnen").length;
+ $("kTasks").textContent=state.tasks.filter(t=>!t.done&&t.due<=today()).length;
+ $("kAppts").textContent=state.leads.filter(l=>l.status==="termin").length;
+ $("kWon").textContent=state.leads.filter(l=>l.status==="gewonnen").length;
+ const next=[...state.tasks].filter(t=>!t.done).sort((a,b)=>a.due.localeCompare(b.due)).slice(0,4);
+ $("homeNext").innerHTML=next.map(t=>`<div class="card" style="margin:8px 0"><b>${esc(t.title)}</b><div class="meta">${esc(t.company||"Allgemein")} · ${esc(t.due)}</div></div>`).join("")||`<div class="card">Keine offenen Follow-ups. Zeit für neue Besuche! 💪</div>`;
 }
-function tariffCommissionRecommendationHtml(){
-  const c=calculateCommission();
-
-  const tpv=c.tpv||0;
-  const terminals=c.terminals||1;
-  const users=c.users||1;
-  const needsPos=c.needsPos;
-  const needsSoftware=c.needsSoftware;
-
-  let tariff='Umsatzbasiertes Zahlen';
-  let reason='Für kleinere bzw. flexible Zahlungsvolumen ist dieser Tarif die einfachste Lösung.';
-
-  if(tpv>=3500){
-    tariff='Zahlungen Plus';
-    reason='Ab diesem Zahlungsvolumen ist Zahlungen Plus grundsätzlich prüfenswert, weil die Transaktionsgebühr niedriger ist.';
-  }
-
-  let solution='Tap to Pay';
-
-  if(terminals>=1){
-    solution=terminals>=2?'Terminal / mehrere Terminals':'Terminal';
-  }
-
-  if(needsPos){
-    solution='SumUp Kasse + Terminal';
-  }else if(needsSoftware){
-    solution='SumUp Software + Terminal';
-  }
-
-  let strategy=[];
-
-  if(needsPos){
-    strategy.push('Kassensystem einplanen');
-    strategy.push('POS-Aktivierungsbonus berücksichtigen');
-  }
-
-  if(needsSoftware){
-    strategy.push('Softwareumsatz berücksichtigen');
-  }
-
-  if(terminals>0){
-    strategy.push(terminals+' Hardware'+(terminals>1?'-Einheiten':'-Einheit')+' einplanen');
-  }
-
-  if(tpv>=COMMISSION.tpvMasterThreshold){
-    strategy.push('TPV-Master-Bonus prüfen');
-    if(needsSoftware) strategy.push('Kassensystem-Champion-Bonus prüfen');
-  }
-
-  strategy.push('Aktivierungsbonus ab 500 € TPV prüfen');
-
-  return `
-    <div class="recommendation">
-      <div class="assistant-label">💰 neXaro Provisions-Empfehlung</div>
-
-      <h3>${esc(tariff)}</h3>
-
-      <div class="tip">
-        <b>Kundensituation:</b><br>
-        ${tpv.toLocaleString('de-DE')} € Kartenumsatz / Monat ·
-        ${users} Nutzer ·
-        ${terminals} Terminal${terminals!==1?'s':''}
-      </div>
-
-      <div class="tip">
-        <b>Empfohlene Lösung:</b><br>
-        ${esc(solution)}
-      </div>
-
-      <div class="tip">
-        <b>Warum dieser Tarif?</b><br>
-        ${esc(reason)}
-      </div>
-
-      <div class="tip">
-        <b>Provisionsstrategie:</b><br>
-        ${strategy.map(x=>'• '+esc(x)).join('<br>')}
-      </div>
-
-      <div class="tip">
-        <b>Voraussichtliche Provision aus den aktuellen Angaben:</b><br>
-        ${c.totalImmediate.toLocaleString('de-DE',{style:'currency',currency:'EUR'})}
-        sofortig<br>
-        ${c.residual.toLocaleString('de-DE',{style:'currency',currency:'EUR'})}
-        Residual pro Monat
-      </div>
-    </div>
-  `;
+function statusLabel(s){return ({neu:"Neu",kontakt:"Kontaktiert",termin:"Termin",gewonnen:"Gewonnen"})[s]||s}
+function renderLeads(){
+ const q=($("leadSearch").value||"").toLowerCase();
+ let arr=state.leads.filter(l=>(leadFilter==="all"||l.status===leadFilter)&&JSON.stringify(l).toLowerCase().includes(q));
+ $("leadList").innerHTML=arr.map(l=>`<div class="lead-card">
+  <div class="lead-top"><div><div class="lead-title">${esc(l.company)}</div><div class="meta">${esc(l.industry||"")} · ${esc(l.address||"")}</div></div><span class="badge ${l.status==="gewonnen"?"green":l.status==="termin"?"orange":""}">${statusLabel(l.status)}</span></div>
+  <div class="meta">${esc(l.contact||"Kein Ansprechpartner")} · ${esc(l.phone||"")}</div>
+  <div class="meta">TPV: ${l.tpv?money(l.tpv)+"/Monat":"nicht erfasst"} · Lösung: ${esc(l.product||"offen")}</div>
+  <div class="lead-actions"><button onclick="editLead('${l.id}')">✏️ Bearbeiten</button><button onclick="callLead('${l.id}')">📞 Anrufen</button><button onclick="mailLead('${l.id}')">✉️ E-Mail</button><button onclick="leadMaps('${l.id}')">🗺️ Maps</button></div>
+ </div>`).join("")||`<div class="card">Noch keine Leads vorhanden.</div>`;
 }
-function sumupTariffHtml(){return `<div class="tariff-card"><div class="assistant-label">SUMUP DEUTSCHLAND 🇩🇪 · TARIF-CHECK</div><h3>Aktueller Preisstand</h3><div class="tariff-grid"><div><b>Umsatzbasiert</b><strong>${SUMUP.payg.rate}</strong><small>${SUMUP.payg.monthly}/Monat</small></div><div><b>Zahlungen Plus</b><strong>${SUMUP.plus.rate}</strong><small>${SUMUP.plus.monthly}/Monat · ${SUMUP.plus.yearly}/Jahr</small></div></div><p class="meta">Verifiziert am ${SUMUP.verified}. Nur deutsche SumUp-Konditionen (${SUMUP.sourceDomain}). ${SUMUP.plus.note}</p><a class="official-link" href="${SUMUP.pricesUrl}" target="_blank" rel="noopener">↗ Offizielle SumUp-Preise prüfen</a></div>`}
-function productHtml(name){const p=SUMUP.products.find(x=>x.name===name);if(!p)return '';return `<div class="product-card"><div><b>Passender SumUp-Ansatz</b><h4>${p.name}</h4><div class="meta">${p.fit}</div></div><strong>${p.price}</strong><a class="official-link" href="${p.url}" target="_blank" rel="noopener">↗ Produktdetails bei SumUp</a></div>`}
-function fitHtml(){
-  const product=recommendedProduct();
-  const fits={
-    'Tap to Pay':'Gut, wenn der Außendienstler bzw. Betrieb kontaktlose Zahlungen direkt mit einem kompatiblen Smartphone annehmen möchte.',
-    'Solo Lite':'Sinnvoll, wenn ein kompaktes Kartenlesegerät genügt und ein Smartphone gekoppelt werden kann.',
-    'Solo':'Sinnvoll für mobile oder stationäre Kartenzahlungen mit einem eigenständigen Terminal.',
-    'Terminal':'Sinnvoll, wenn ein eigenständiges All-in-one-Gerät mit zusätzlichen Bestell-/Kassenfunktionen gefragt ist.'
-  };
-  return `<div class="tip"><b>Warum dieser Ansatz?</b> ${fits[product]||''}</div>`;
-}
-function nextQuestion(){
-  if(A.solution==='Keine Kartenzahlung') return 'Was müsste sich bei Kosten, Bedienung oder Einfachheit ändern, damit Sie Kartenzahlung testen würden?';
-  if(A.pain==='Kosten') return 'Geht es Ihnen eher um die einmaligen Anschaffungskosten oder um die laufenden Transaktionskosten?';
-  if(A.pain==='Vertrag / Bindung') return 'Was stört Sie an der aktuellen Bindung konkret?';
-  if(A.pain==='Mobilität') return 'Brauchen Sie die Kartenzahlung auch außerhalb eines festen Kassenplatzes?';
-  if(A.pain==='Geschwindigkeit') return 'Geht es vor allem um die Dauer pro Zahlung oder um Wartezeiten bei Stoßzeiten?';
-  if(A.pain==='Bedienung') return 'Was ist in der täglichen Bedienung aktuell unnötig kompliziert?';
-  if(A.pain==='Technik') return 'Welche technische Situation tritt bei Ihnen am häufigsten auf?';
-  if(A.pain==='Zahlungsarten') return 'Welche Zahlungsart fehlt Ihnen heute konkret?';
-  if(A.pain==='Auszahlung / Abrechnung') return 'Was genau möchten Sie bei Auszahlung oder Abrechnung verbessern?';
-  if(A.pain==='Support') return 'Was erwarten Sie von einem besseren Support konkret?';
-  return 'Wenn Sie eine Sache sofort ändern könnten – welche wäre das?';
-}
-function recommendationHtml(){
-  const product=recommendedProduct();
-  const solution=A.solution||'';
-  let headline='Nächster Gesprächsschritt';
-  let text=nextQuestion();
-  if(A.pain && solution!=='Keine Kartenzahlung'){
-    headline='Verkaufsansatz';
-    text=`Sie haben als Hauptthema „${A.pain}“ genannt. Sprich jetzt nicht über alles, sondern genau über diesen Punkt.`;
-  }
-  return `<div class="recommendation"><div class="assistant-label">NE XARO · EMPFEHLUNG</div><h4>${headline}</h4><div class="script">${esc(text)}</div>${productHtml(product)}${fitHtml()}</div>`;
-}
-
-function recommendedProduct(){
-  if(A.pain==='Mobilität') return 'Solo';
-  if(A.pain==='Technik' || A.pain==='Bedienung') return 'Solo';
-  if(A.pain==='Geschwindigkeit' || A.pain==='Zahlungsarten') return 'Solo';
-  if(A.solution==='Keine Kartenzahlung') return 'Solo Lite';
-  if(A.industry==='Gastronomie' && (A.pain==='Bedienung' || A.pain==='Geschwindigkeit')) return 'Terminal';
-  return 'Solo';
-}
-
-const openings={
-'Kiosk / Späti':'Moin, ich bin gerade bei einigen Geschäften hier in der Gegend unterwegs. Ich hätte mal eine kurze Frage: Wie zufrieden sind Sie aktuell mit Ihrer Kartenzahlung?',
-'Einzelhandel':'Ich wollte Sie kurz etwas zu Ihrer Kartenzahlung fragen. Sind Sie mit Ihrer jetzigen Lösung zufrieden?',
-'Bäckerei':'Bei Ihnen geht es beim Bezahlen wahrscheinlich ziemlich schnell. Wie zufrieden sind Sie denn mit Ihrer aktuellen Kartenzahlung?',
-'Getränkemarkt':'Moin, ich bin gerade im regionalen Außendienst unterwegs. Darf ich kurz fragen, wie Sie Ihre Kartenzahlungen aktuell lösen?',
-'Gastronomie':'Ich sehe, bei Ihnen läuft ordentlich Betrieb. Eine kurze Frage: Wie lösen Sie aktuell Ihre Kartenzahlungen?',
-'Tankstelle':'Ich bin gerade im regionalen Außendienst unterwegs und spreche mit Tankstellen zum Thema Kartenzahlung. Darf ich kurz fragen, wie Sie das aktuell gelöst haben?',
-'Friseur / Beauty':'Eine kurze Frage: Wie läuft bei Ihnen die Kartenzahlung aktuell – sind Sie damit zufrieden?',
-'Handwerk':'Ich bin gerade im Außendienst unterwegs und habe eine kurze Frage: Können Ihre Kunden bei Ihnen bzw. direkt beim Kunden mit Karte bezahlen?',
-'Mobiler Service':'Wie nehmen Sie unterwegs eigentlich Kartenzahlungen an?',
-'Sonstiges':'Moin, ich bin gerade im regionalen Außendienst unterwegs. Darf ich Ihnen kurz zwei Fragen zu Ihrer Kartenzahlung stellen?'
-};
-
-const objections={
-'Zu teuer':{say:'Verstehe. Meinen Sie die einmaligen Kosten, die laufenden Kosten oder die Kosten im Vergleich zu Ihrer jetzigen Lösung?',ask:'Welche Kosten sind für Sie dabei konkret der Knackpunkt?'},
-'Habe schon ein Terminal':{say:'Das verstehe ich. Die Frage ist gar nicht, ob Sie grundsätzlich ein Terminal brauchen – Sie haben ja bereits eins. Mich interessiert eher: Was gefällt Ihnen an Ihrer jetzigen Lösung und was würden Sie daran gerne verbessern?',ask:'Wenn Sie eine Sache sofort ändern könnten – welche wäre das?'},
-'Bin zufrieden':{say:'Das ist gut. Dann möchte ich Ihnen auch nichts einreden. Gibt es trotzdem etwas, das Sie sich zusätzlich wünschen würden?',ask:'Was wäre das, wenn Sie eine Sache ergänzen könnten?'},
-'Keine Zeit':{say:'Verstehe ich. Dann machen wir es ganz einfach: eine einzige Frage. Wenn es für Sie nicht interessant ist, bin ich sofort wieder weg.',ask:'Sind Sie mit Ihrer aktuellen Kartenzahlung wirklich vollständig zufrieden?'},
-'Schicken Sie Unterlagen':{say:'Gerne. Damit ich Ihnen nicht einfach irgendwelche Unterlagen schicke: Was ist für Sie dabei am wichtigsten – Kosten, Funktionen oder die praktische Nutzung?',ask:'Was soll ich in den Unterlagen für Sie besonders berücksichtigen?'},
-'Muss mit meinem Partner sprechen':{say:'Klar. Dann sollten wir die richtige Person direkt mitnehmen.',ask:'Wann ist die Person am besten erreichbar und was ist ihr bei einer Lösung besonders wichtig?'},
-'Kein Bedarf':{say:'Verstanden. Darf ich kurz fragen, woran Sie das festmachen?',ask:'Was müsste sich ändern, damit Kartenzahlung für Sie interessant würde?'},
-'Schlechte Erfahrung':{say:'Das kann ich nachvollziehen. Gerade dann ist wichtig zu verstehen, was damals konkret schiefgelaufen ist.',ask:'Was war bei der damaligen Lösung das größte Problem?'},
-'Sonstiger Einwand':{say:'Verstehe. Lassen Sie uns den Punkt kurz konkret machen, dann kann ich einschätzen, ob er überhaupt relevant ist.',ask:'Was genau hält Sie momentan noch zurück?'}
-};
-
-function navTo(id){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id));
-  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.s===id));
-  render();
-}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>navTo(b.dataset.s));
-
 function openLead(id){
-  $('form').reset();$('id').value=id||'';$('dlgTitle').textContent=id?'Lead bearbeiten':'Neuer Lead';
-  if(id){const l=S.leads.find(x=>x.id===id);['company','industry','status','contact','phone','email','address','provider','terminal','product','priority','need','next','due','notes'].forEach(k=>$(k).value=l[k]||'')}
-  $('dlg').showModal();
+ const l=state.leads.find(x=>x.id===id)||{id:"",company:"",industry:"",contact:"",phone:"",email:"",address:"",status:"neu",tpv:"",provider:"",product:"",notes:"",next:"",due:today()};
+ showModal(`<h2>${id?"Lead bearbeiten":"Neuen Lead erfassen"}</h2>
+ <div class="form-grid">
+ <input id="f_company" class="full" placeholder="Firma *" value="${esc(l.company)}">
+ <input id="f_industry" placeholder="Branche" value="${esc(l.industry)}"><input id="f_contact" placeholder="Ansprechpartner" value="${esc(l.contact)}">
+ <input id="f_phone" inputmode="tel" placeholder="Telefon" value="${esc(l.phone)}"><input id="f_email" type="email" placeholder="E-Mail" value="${esc(l.email)}">
+ <input id="f_address" class="full" placeholder="Adresse / Ort" value="${esc(l.address)}">
+ <input id="f_tpv" inputmode="decimal" placeholder="Kartenzahlungsvolumen €/Monat" value="${esc(l.tpv)}"><select id="f_status"><option value="neu">Neu</option><option value="kontakt">Kontaktiert</option><option value="termin">Termin</option><option value="gewonnen">Gewonnen</option></select>
+ <input id="f_provider" placeholder="Aktueller Anbieter" value="${esc(l.provider)}"><input id="f_product" placeholder="Empfohlene Lösung" value="${esc(l.product)}">
+ <input id="f_next" placeholder="Nächster Schritt" value="${esc(l.next)}"><input id="f_due" type="date" value="${esc(l.due||today())}">
+ <textarea id="f_notes" class="full" placeholder="Notizen">${esc(l.notes)}</textarea>
+ </div><button class="primary wide" onclick="saveLeadForm('${id}')">Speichern</button>`);
+ $("f_status").value=l.status;
 }
-$('quick').onclick=()=>openLead();$('add').onclick=()=>openLead();$('close').onclick=()=>$('dlg').close();$('cancel').onclick=()=>$('dlg').close();
-$('form').onsubmit=e=>{
-  e.preventDefault();
-  const data={company:$('company').value.trim(),industry:$('industry').value,status:$('status').value,contact:$('contact').value,phone:$('phone').value,email:$('email').value,address:$('address').value,provider:$('provider').value,terminal:$('terminal').value,product:$('product').value,priority:$('priority').value,need:$('need').value,next:$('next').value,due:$('due').value,notes:$('notes').value};
-  const id=$('id').value;if(id)Object.assign(S.leads.find(x=>x.id===id),data);else S.leads.unshift({id:uid(),createdAt:new Date().toISOString(),...data});
-  $('dlg').close();save();
-};
-
-function card(l){
-  return `<div class="card lead"><div class="top"><div><b>${esc(l.company)}</b><div class="meta">${esc(l.industry)}${l.address?' · '+esc(l.address):''}</div></div><span class="pill">${esc(status(l.status))}</span></div>
-  <div class="meta">${l.contact?esc(l.contact)+' · ':''}${esc(l.product||'Noch offen')}${l.provider?' · aktuell: '+esc(l.provider):''}</div>
-  ${l.need?`<div class="meta">Bedarf: ${esc(l.need)}</div>`:''}
-  ${l.next?`<div><b>Nächster Schritt:</b> ${esc(l.next)}${l.due?' · '+esc(l.due):''}</div>`:''}
-  <button onclick="openLead('${l.id}')">Bearbeiten</button>${l.phone?`<a href="tel:${esc(l.phone)}">📞 Anrufen</a>`:''}${l.address?`<button onclick="nav('${encodeURIComponent(l.address)}')">🧭 Navigation</button>`:''}<button onclick="startForLead('${l.id}')">🤝 Assistant</button><button onclick="visit('${l.id}')">📝 Besuch</button></div>`;
+function saveLeadForm(id){
+ const company=$("f_company").value.trim();if(!company)return alert("Firma fehlt.");
+ const lead={id:id||uid(),company,industry:$("f_industry").value.trim(),contact:$("f_contact").value.trim(),phone:$("f_phone").value.trim(),email:$("f_email").value.trim(),address:$("f_address").value.trim(),tpv:Number(($("f_tpv").value||"").replace(",","."))||0,provider:$("f_provider").value.trim(),product:$("f_product").value.trim(),status:$("f_status").value,next:$("f_next").value.trim(),due:$("f_due").value||today(),notes:$("f_notes").value.trim(),updatedAt:new Date().toISOString()};
+ const i=state.leads.findIndex(x=>x.id===lead.id);if(i>=0)state.leads[i]=lead;else state.leads.unshift(lead);closeModal();save();
 }
+function editLead(id){openLead(id)}
+function callLead(id){const l=state.leads.find(x=>x.id===id);if(l?.phone)location.href="tel:"+l.phone;else alert("Keine Telefonnummer hinterlegt.")}
+function mailLead(id){const l=state.leads.find(x=>x.id===id);if(l?.email)location.href=`mailto:${l.email}?subject=${encodeURIComponent("SumUp Beratung – "+l.company)}`;else alert("Keine E-Mail hinterlegt.")}
+function leadMaps(id){const l=state.leads.find(x=>x.id===id);if(l?.address)window.open("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(l.address),"_blank");else alert("Keine Adresse hinterlegt.")}
+window.editLead=editLead;window.callLead=callLead;window.mailLead=mailLead;window.leadMaps=leadMaps;window.saveLeadForm=saveLeadForm;
 
-function render(){
-  const today=new Date().toISOString().slice(0,10);
-  $('kLeads').textContent=S.leads.filter(l=>!['gewonnen','verloren'].includes(l.status)).length;
-  $('kTasks').textContent=S.leads.filter(l=>l.due===today&&!['gewonnen','verloren'].includes(l.status)).length;
-  $('kAppts').textContent=S.leads.filter(l=>l.status==='termin').length;$('kWon').textContent=S.leads.filter(l=>l.status==='gewonnen').length;
-  const q=($('search').value||'').toLowerCase();const a=S.leads.filter(l=>(filter==='all'||l.status===filter)&&[l.company,l.contact,l.address,l.industry].join(' ').toLowerCase().includes(q));
-  $('list').innerHTML=a.length?a.map(card).join(''):'<div class="card">Noch keine passenden Leads.</div>';
-  const t=S.leads.filter(l=>l.due&&!['gewonnen','verloren'].includes(l.status)).sort((a,b)=>a.due.localeCompare(b.due));
-  $('taskList').innerHTML=t.length?t.map(card).join(''):'<div class="card">Keine offenen Follow-ups. Zeit für neue Besuche! 💪</div>';
-  $('preview').innerHTML=t.slice(0,4).map(l=>`<div class="card" style="margin:8px 0"><b>${esc(l.company)}</b><div class="meta">${esc(l.next||'Follow-up')} · ${esc(l.due)}</div></div>`).join('')||'<div class="card">Keine offenen Follow-ups.</div>';
-  $('areaList').innerHTML=S.leads.filter(l=>l.address).map(card).join('')||'<div class="card">Leads mit Adresse erscheinen hier.</div>';
-  if($('tariffBox')) $('tariffBox').innerHTML=sumupTariffHtml();
-  renderAssistant();
+function assistantStep(){
+ const a=assistant;
+ if(a.step===1)return `<div class="assistant-card"><div class="assistant-label">NE XARO · START</div><h3>Wen sprichst du an?</h3><input id="aCompany" placeholder="Firma / Betrieb" value="${esc(a.company)}"><select id="aIndustry"><option value="">Branche auswählen</option>${["Kiosk / Späti","Einzelhandel","Gastronomie","Bäckerei","Friseur","Handwerk","Getränkemarkt","Tankstelle","Sonstiges"].map(x=>`<option ${a.industry===x?"selected":""}>${x}</option>`).join("")}</select><button class="primary wide" data-a="step1">Gespräch starten →</button></div>`;
+ if(a.step===2)return `<div class="assistant-card"><div class="assistant-label">NE XARO · IST-SITUATION</div><h3>Wie nimmt der Betrieb aktuell Kartenzahlungen an?</h3><div class="choice-grid">${["SumUp","Anderes Terminal","Keine Kartenzahlung","Weiß ich noch nicht"].map(x=>`<button class="secondary" data-a="solution" data-v="${esc(x)}">${x}</button>`).join("")}</div></div>`;
+ if(a.step===3)return `<div class="assistant-card"><div class="assistant-label">NE XARO · ZUFRIEDENHEIT</div><h3>Wie zufrieden ist der Betrieb mit der aktuellen Lösung?</h3><div class="choice-grid">${["Sehr zufrieden","Grundsätzlich zufrieden","Nicht zufrieden"].map(x=>`<button class="secondary" data-a="satisfaction" data-v="${x}">${x}</button>`).join("")}</div></div>`;
+ if(a.step===4)return `<div class="assistant-card"><div class="assistant-label">NE XARO · QUALIFIZIERUNG</div><h3>Wie hoch ist ungefähr das monatliche Kartenzahlungsvolumen?</h3><div class="choice-grid">${[[4999,"Unter 5.000 €"],[5000,"5.000–9.999 €"],[10000,"10.000–14.999 €"],[15000,"15.000–19.999 €"],[20000,"20.000 € und mehr"]].map(x=>`<button class="secondary" data-a="tpv" data-v="${x[0]}">${x[1]}</button>`).join("")}</div><div class="tip"><b>Interne Vertriebsqualifizierung:</b> 5.000 €+ Kartenvolumen gilt bei neXaro als Zielkriterium. Das ist keine von SumUp behauptete Mindestanforderung.</div></div>`;
+ if(a.step===5){
+  if(a.objection)return `<div class="assistant-card"><div class="assistant-label">NE XARO · EINWAND</div><h3>${esc(a.objection)}</h3><div class="tip"><b>Sales Coach:</b> Erst verstehen, dann konkretisieren, dann passende Lösung anbieten. Keine Preisargumentation ohne Ist-Kosten.</div><button class="primary wide" data-a="clearObjection">Einwand klären →</button>`;
+  return `<div class="assistant-card"><div class="assistant-label">NE XARO · LÖSUNG</div>${customerRecommendation()}</div>`;
+ }
+ if(a.step===6)return `<div class="assistant-card result"><div class="assistant-label">NE XARO · ABSCHLUSS</div><h3>Abschluss vorbereiten</h3><div class="choice-grid">${["Abschluss heute","Rückruf vereinbaren","Angebot senden","Kein Interesse"].map(x=>`<button class="secondary" data-a="finish" data-v="${x}">${x}</button>`).join("")}</div></div>`;
 }
-$('search').oninput=render;
-document.querySelectorAll('.filters button').forEach(b=>b.onclick=()=>{filter=b.dataset.f;document.querySelectorAll('.filters button').forEach(x=>x.classList.remove('active'));b.classList.add('active');render()});
-function nav(a){window.open('https://www.google.com/maps/search/?api=1&query='+a,'_blank')}
-function visit(id){const l=S.leads.find(x=>x.id===id);const n=prompt('Besuchsnotiz für '+l.company,l.notes||'');if(n!==null){l.notes=n;if(l.status==='neu')l.status='kontaktiert';save()}}
-
-function startForLead(id){
-  const l=S.leads.find(x=>x.id===id);A.step=1;A.company=l.company;A.leadId=id;A.industry=l.industry||'';A.solution='';A.satisfaction='';A.pain=l.need||'';A.objection='';A.decision='';A.timing='';A.saved=false;navTo('assistant');
+function customerRecommendation(){
+ const r=tariffRecommendation(assistant.tpv);
+ const prod=productRecommendation();
+ const pain=assistant.pain?`<div class="info">Hauptthema: <b>${esc(assistant.pain)}</b></div>`:"";
+ return `${pain}<div class="option"><div class="eyebrow">PASSENDER SUMUP-ANSATZ</div><strong>${r.name}</strong><div class="price">${r.feeText}</div><div class="info">${r.reason}</div></div><div class="option"><div class="eyebrow">EMPFOHLENE LÖSUNG</div><strong>${prod.name}</strong><div class="info">${prod.fit}</div>${prod.price!==null?`<div class="price">${prod.price===0?"0 €":money(prod.price)} <small>zzgl. MwSt. / je nach Angebot</small></div>`:""}</div><div class="tip"><b>Sales Coach:</b> „Lassen Sie uns kurz Ihre aktuelle Situation mit der passenden SumUp-Lösung vergleichen. Dann sehen Sie sofort, ob sich der Wechsel für Sie lohnt.“</div><button class="primary wide" data-a="next">Weiter zum Abschluss →</button>`;
 }
-$('startAssistant').onclick=()=>{A.step=1;A.company='';A.leadId='';A.industry='';A.solution='';A.satisfaction='';A.pain='';A.objection='';A.decision='';A.timing='';A.saved=false;navTo('assistant')};
-$('resetAssistant').onclick=()=>{$('startAssistant').click()};
-
+function tariffRecommendation(tpv){
+ if(Number(tpv)>=3500)return {name:"Zahlungen Plus",feeText:"0,79 % + 19 €/Monat",reason:"Für monatliche Zahlungen ab 3.500 € kann dieser Tarif bei passenden Vor-Ort-Verbraucherkarten Gebühren sparen."};
+ return {name:"Umsatzbasiertes Zahlen",feeText:"1,39 % · 0 €/Monat",reason:"Keine feste Monatsgebühr und damit flexibel bei niedrigeren oder schwankenden Umsätzen."};
+}
+function productRecommendation(){
+ const i=assistant.industry||"";
+ if(["Gastronomie","Einzelhandel"].includes(i))return PRODUCTS.find(p=>p.id==="terminal");
+ if(["Kiosk / Späti","Getränkemarkt","Bäckerei","Friseur","Handwerk","Tankstelle"].includes(i))return PRODUCTS.find(p=>p.id==="solo");
+ return PRODUCTS.find(p=>p.id==="solo-lite");
+}
 function renderAssistant(){
-  const root=$('assistantApp');if(!root)return;
-  const done=A.step-1;
-  let html=`<div class="assistant-shell"><div class="stepbar">${[1,2,3,4,5].map((x,i)=>`<span class="${i<done?'done':''}"></span>`).join('')}</div>`;
-  if(A.step===1)html+=step1();
-  if(A.step===2)html+=step2();
-  if(A.step===3)html+=step3();
-  if(A.step===4)html+=step4();
-  if(A.step===5)html+=step5();
-  if(A.step===6)html=step6();
-  root.innerHTML=html+'</div>';
-  root.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>assistantAction(b.dataset.a,b.dataset.v||''));
-}
-
-function step1(){
- return `<div class="assistant-card"><div class="assistant-label">Schritt 1 · Einstieg</div><h3>Wen sprichst du an?</h3>
- <label>Firma (optional)<input data-field="company" value="${esc(A.company)}" placeholder="z. B. Späti am Markt"></label>
- <label>Branche<select data-field="industry">${Object.keys(openings).map(x=>`<option ${A.industry===x?'selected':''}>${x}</option>`).join('')}</select></label>
- <div class="script"><b>Dein Einstieg:</b><br>${esc(openings[A.industry||Object.keys(openings)[0]])}</div>
- <div class="assistant-actions"><button class="primary" data-a="step1next">Gespräch starten →</button></div></div>`;
-}
-
-function step2(){
- return `<div class="assistant-card"><div class="assistant-label">Schritt 2 · Bedarf ermitteln</div><h3>Wie nimmt der Betrieb aktuell Kartenzahlungen an?</h3>
- <div class="choice-grid two">${['SumUp','Anderes Terminal','Keine Kartenzahlung','Weiß ich noch nicht'].map(x=>`<button class="choice" data-a="solution" data-v="${x}">${x}</button>`).join('')}</div>
- ${A.solution?`<div class="tip">Auswahl: <b>${esc(A.solution)}</b></div>${A.solution==='SumUp'||A.solution==='Anderes Terminal'?sumupTariffHtml():sumupTariffHtml()}`:''}</div>`;
-}
-
-
-/* ===== neXaro V5.2 · robuste Kostenmatrix + Hardware-Rabatt + Angebotsmail ===== */
-const V52={
- emailSubject:'Ihr individuelles SumUp-Angebot – neXaro Solutions',
- calc:{turnover:'',currentRate:'',currentFixed:'',currentOther:'',calculated:false},
- offer:{customer:'',email:'',note:'',product:'',discount:'0'}
-};
-function euro(n){return new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(Number(n)||0)}
-function num(v){return Math.max(0,Number(String(v??'').replace(',','.'))||0)}
-function hardwareBase(name){
- const p=SUMUP.products.find(x=>x.name===name);if(!p)return 0;
- const m=p.price.match(/([0-9]+(?:[.,][0-9]+)?)/);return m?num(m[1]):0;
-}
-function hardwareDiscount(name){
- const excluded=['Kassenschublade','Handscanner','Epson-Drucker'];
- return excluded.includes(name)?0:Math.min(25,num(V52.offer.discount));
-}
-function hardwarePrice(name){
- const base=hardwareBase(name),d=hardwareDiscount(name);
- return base*(1-d/100);
-}
-function calcCosts(){
- const t=num(V52.calc.turnover),r=num(V52.calc.currentRate)/100,fixed=num(V52.calc.currentFixed),other=num(V52.calc.currentOther);
- const current=t*r+fixed+other,payg=t*0.0139,plus=t*0.0079+19;
- const best=t>=3500?plus:payg;
- return {t,current,payg,plus,best,saving:current-best};
-}
-function costResultsHtml(){
- const c=calcCosts();
- if(!c.t)return `<div class="tip">Noch keine Kosten berechnet. Bitte Werte eingeben und anschließend auf <b>„Kosten berechnen“</b> tippen.</div>`;
- return `<div class="tariff-grid">
-  <div><b>Aktuell</b><strong>${euro(c.current)}</strong><small>geschätzt / Monat</small></div>
-  <div><b>SumUp Umsatzbasiert</b><strong>${euro(c.payg)}</strong><small>1,39 %</small></div>
-  <div><b>SumUp Zahlungen Plus</b><strong>${euro(c.plus)}</strong><small>0,79 % + 19 €</small></div>
-  <div><b>${c.saving>=0?'Ersparnis':'Mehrkosten'}</b><strong>${euro(Math.abs(c.saving))}</strong><small>vs. passende SumUp-Option</small></div>
- </div>`;
-}
-function costMatrixHtml(){
- return `<div class="tariff-card" id="v52Matrix">
-  <div class="assistant-label">NE XARO · KOSTENMATRIX 🇩🇪</div>
-  <h3>Aktuelle Kosten vs. SumUp</h3>
-  <div class="tariff-grid">
-   <div><b>Kartenumsatz / Monat</b><input id="v52Turnover" inputmode="decimal" value="${esc(V52.calc.turnover)}" placeholder="z. B. 5000"></div>
-   <div><b>Effektive aktuelle Transaktionsgebühr</b><input id="v52Rate" inputmode="decimal" value="${esc(V52.calc.currentRate)}" placeholder="z. B. 1,90"></div>
-   <div><b>Aktuelle Monatsgebühr</b><input id="v52Fixed" inputmode="decimal" value="${esc(V52.calc.currentFixed)}" placeholder="z. B. 15"></div>
-   <div><b>Sonstige Monatskosten</b><input id="v52Other" inputmode="decimal" value="${esc(V52.calc.currentOther)}" placeholder="z. B. 5"></div>
-  </div>
-  <div id="v52CostResults" style="margin-top:12px">${V52.calc.calculated?costResultsHtml():`<div class="tip">Die Eingabe wird bewusst <b>nicht automatisch neu gerendert</b>. So bleibt die iPhone-Tastatur stabil. Erst nach vollständiger Eingabe berechnen.</div>`}</div>
-  <div class="assistant-actions"><button class="primary" data-a="calcCosts">🧮 Kosten berechnen</button></div>
-  <p class="meta">Schätzung auf Basis der eingegebenen aktuellen Kosten. Bei gemischten Kartenarten oder Sonderkonditionen kann das tatsächliche Ergebnis abweichen. Für die Vergleichsanzeige wird Zahlungen Plus ab 3.500 € monatlichem Zahlungsvolumen als passende Option berücksichtigt.</p>
-  <a class="official-link" href="${SUMUP.pricesUrl}" target="_blank" rel="noopener">↗ Deutsche SumUp-Preise prüfen</a>
- </div>`;
-}
-function readCostFields(){
- V52.calc.turnover=$('v52Turnover')?.value||V52.calc.turnover;
- V52.calc.currentRate=$('v52Rate')?.value||V52.calc.currentRate;
- V52.calc.currentFixed=$('v52Fixed')?.value||V52.calc.currentFixed;
- V52.calc.currentOther=$('v52Other')?.value||V52.calc.currentOther;
- V52.calc.calculated=true;
-}
-function offerHardwareOptions(selected){
- const names=[...SUMUP.products.map(x=>x.name),'Kassenschublade','Handscanner','Epson-Drucker'];
- return names.map(name=>`<option value="${esc(name)}" ${selected===name?'selected':''}>${esc(name)}</option>`).join('');
-}
-function offerHtml(){
- const p=V52.offer.product||recommendedProduct();
- const base=hardwareBase(p),d=hardwareDiscount(p),price=hardwarePrice(p);
- const excluded=['Kassenschublade','Handscanner','Epson-Drucker'].includes(p);
- return `<div class="tariff-card" id="v52Offer">
-  <div class="assistant-label">NE XARO · ANGEBOTSMODUS</div>
-  <h3>Angebot per E-Mail vorbereiten</h3>
-  <div class="tariff-grid">
-   <div><b>Kundenname / Firma</b><input id="v52Customer" value="${esc(V52.offer.customer||A.company)}" placeholder="Name oder Firma"></div>
-   <div><b>E-Mail des Kunden</b><input id="v52Email" type="email" value="${esc(V52.offer.email)}" placeholder="kunde@beispiel.de"></div>
-   <div><b>Hardware</b><select id="v52Product">${offerHardwareOptions(p)}</select></div>
-   <div><b>Hardware-Rabatt</b><input id="v52Discount" inputmode="decimal" value="${esc(V52.offer.discount)}" placeholder="0–25 %"></div>
-  </div>
-  <div class="tip" style="margin-top:12px">
-   ${esc(p)}: <b>${excluded?'Rabatt nicht anwendbar':euro(price)}</b>${excluded?'':' nach '+d+' % Rabatt'}${base&&!excluded?' · regulär '+euro(base):''}.
-   <br><b>Rabattregel:</b> bis zu 25 % auf rabattfähige SumUp-Hardware. Ausgenommen sind Kassenschublade, Handscanner und Epson-Drucker.
-  </div>
-  <label style="display:block;margin-top:12px"><b>Persönliche Notiz</b><textarea id="v52Note" rows="3" placeholder="z. B. besprochenes Einsparpotenzial, nächster Schritt ...">${esc(V52.offer.note)}</textarea></label>
-  <div class="assistant-actions"><button class="primary" data-a="sendOffer">✉️ Angebot in Mail öffnen</button></div>
-  <p class="meta">Die Mail wird vorbereitet und in der auf dem iPhone eingerichteten Mail-App geöffnet. Du prüfst sie und tippst selbst auf „Senden“.</p>
- </div>`;
-}
-function coachHtml(){
- const q=nextQuestion(),p=recommendedProduct();
- const scripts={
-  Mobilität:'„Wenn Sie auch unterwegs kassieren, würde ich genau auf die mobile Nutzung eingehen. Entscheidend ist, dass Sie nicht an einen festen Kassenplatz gebunden sind.“',
-  Kosten:'„Lassen Sie uns nicht über ein Bauchgefühl sprechen. Wir rechnen Ihre heutigen Kosten einmal konkret gegen die SumUp-Konditionen.“',
-  Geschwindigkeit:'„Wenn Geschwindigkeit Ihr Thema ist, sprechen wir über den Ablauf pro Zahlung und die Situation zu Stoßzeiten.“',
-  Bedienung:'„Dann schauen wir uns nicht zehn Funktionen an, sondern genau den Ablauf, der Sie heute Zeit kostet.“',
-  Technik:'„Dann würde ich zuerst klären, wann die Technik Probleme macht und welche Situation die Lösung konkret entschärfen soll.“'
- };
- return `<div class="product-card"><div><b>Sales Coach · Nächste Formulierung</b><div class="script">${esc(scripts[A.pain]||'„Lassen Sie uns genau den Punkt anschauen, der Sie heute am meisten stört.“')}</div><div class="meta"><b>Nächste Frage:</b> ${esc(q)}</div></div><strong>${esc(p)}</strong></div>`;
-}
-
-function step3(){
- let body='';
- if(A.solution==='Keine Kartenzahlung') body=`<div class="question">Frage:</div><div class="script">Darf ich fragen, warum Sie aktuell keine Kartenzahlung anbieten?</div>
- <div class="choice-grid">${['Kunden zahlen bar','Gebühren zu hoch','Kein Bedarf','Bisher keine passende Lösung'].map(x=>`<button class="choice" data-a="pain" data-v="${x}">${x}</button>`).join('')}</div>`;
- else body=`<div class="question">Wie zufrieden ist der Betrieb mit der aktuellen Lösung?</div><div class="choice-grid">${['Sehr zufrieden','Grundsätzlich zufrieden','Nicht zufrieden'].map(x=>`<button class="choice" data-a="satisfaction" data-v="${x}">${x}</button>`).join('')}</div>`;
- return `<div class="assistant-card"><div class="assistant-label">Schritt 3 · Problem & Priorität</div><h3>${A.solution==='Keine Kartenzahlung'?'Grund herausfinden':'Zufriedenheit prüfen'}</h3>${body}
- ${A.satisfaction?`<div class="question">Nächste Frage:</div><div class="script">${A.satisfaction==='Nicht zufrieden'?'Was stört Sie denn momentan am meisten?':'Wenn Sie eine Sache sofort verbessern könnten – welche wäre das?'}</div>
- <div class="choice-grid">${['Kosten','Vertrag / Bindung','Bedienung','Geschwindigkeit','Mobilität','Technik','Zahlungsarten','Auszahlung / Abrechnung','Support','Sonstiges'].map(x=>`<button class="choice" data-a="pain" data-v="${x}">${x}</button>`).join('')}</div>`:''}
- ${A.pain?`<div class="tip">Bedarf erfasst: <b>${esc(A.pain)}</b></div>${recommendationHtml()}${coachHtml()}${costMatrixHtml()}<div class="assistant-actions"><button class="primary" data-a="next3">Einwand vorbereiten →</button></div>`:''}</div>`;
-}
-
-function step4(){
-  return `<div class="assistant-card">
-    <div class="assistant-label">NE XARO · QUALIFIZIERUNG</div>
-    <h3>Wie hoch ist ungefähr Ihr monatliches Kartenzahlungsvolumen?</h3>
-    <div class="choice-grid">
-      <button class="primary" data-a="tpv" data-v="4999">Unter 5.000 €</button>
-      <button class="primary" data-a="tpv" data-v="5000">5.000–9.999 €</button>
-      <button class="primary" data-a="tpv" data-v="10000">10.000–14.999 €</button>
-      <button class="primary" data-a="tpv" data-v="15000">15.000–19.999 €</button>
-      <button class="primary" data-a="tpv" data-v="20000">20.000 € und mehr</button>
-    </div>
-    <div class="tip">
-      <b>Warum frage ich das?</b><br>
-      Damit wir die passende SumUp-Lösung anhand des Zahlungsvolumens empfehlen können.
-    </div>
-  </div>`;
-}
-
-function step5(){
-  const ob=A.objection||'';
-
-  if(ob){
-    return `<div class="assistant-card">
-      <div class="assistant-label">NE XARO · EINWAND</div>
-      <h3>Einwand: ${esc(ob)}</h3>
-      <div class="tip">
-        <b>Sales Coach</b><br>
-        Verstehen, konkretisieren und erst danach die passende Lösung anbieten.
-      </div>
-      <div class="assistant-actions">
-        <button class="primary" data-a="clearObjection">Anderen Einwand wählen</button>
-        <button class="primary" data-a="close">Weiter zum Abschluss</button>
-      </div>
-    </div>`;
-  }
-
-  return `<div class="assistant-card">
-    <div class="assistant-label">NE XARO · EINWAND</div>
-    <h3>Gibt es noch einen Einwand oder eine offene Frage?</h3>
-    <div class="choice-grid two">
-      ${Object.keys(objections).map(v=>`<button class="choice" data-a="objection" data-v="${esc(v)}">${esc(v)}</button>`).join('')}
-    </div>
-    <div class="assistant-actions">
-      <button class="primary" data-a="close">Keine offenen Einwände – zum Abschluss</button>
-    </div>
-  </div>`;
+ const root=$("assistantApp");const done=Math.max(0,assistant.step-1);
+ root.innerHTML=`<div class="assistant-progress">${[1,2,3,4,5,6].map(i=>`<i class="${i<=assistant.step?"on":""}"></i>`).join("")}</div>${assistantStep()}`;
+ root.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>assistantAction(b.dataset.a,b.dataset.v||""));
 }
 function assistantAction(a,v){
- if(a==='step1next'){
-  const c=document.querySelector('[data-field="company"]');
-  if(c)A.company=c.value.trim();
-  A.step=2;
+ if(a==="step1"){assistant.company=$("aCompany").value.trim();assistant.industry=$("aIndustry").value;assistant.step=2}
+ if(a==="solution"){assistant.solution=v;assistant.step=3}
+ if(a==="satisfaction"){assistant.satisfaction=v;if(v==="Nicht zufrieden"){assistant.step=5;assistant.pain="Kosten"}else assistant.step=4}
+ if(a==="tpv"){assistant.tpv=Number(v);assistant.step=5}
+ if(a==="next"){assistant.step=6}
+ if(a==="clearObjection"){assistant.objection="";assistant.step=5}
+ if(a==="finish"){assistant.timing=v;saveAssistantLead()}
+ renderAssistant();
 }
-  
-  if(a==='solution'){A.solution=v;A.step=3}
-  if(a==='satisfaction'){A.satisfaction=v}
-  if(a==='pain'){A.pain=v;A.step=4}
-  if(a==='calcCosts'){readCostFields()}
-  if(a==='next3')A.step=4
-  if(a==='tpv'){A.tpv=v;A.step=5}
-  if(a==='objection')A.objection=v
-  if(a==='clearObjection')A.objection=''
-  if(a==='close')A.step=6
-  if(a==='finish'){A.timing=v;saveAssistantToCRM(v)}
-  if(a==='sendOffer'){
-    V52.offer.customer=$('v52Customer')?.value.trim()||'';
-    V52.offer.email=$('v52Email')?.value.trim()||'';
-    V52.offer.product=$('v52Product')?.value||recommendedProduct();
-    V52.offer.discount=$('v52Discount')?.value||'0';
-    V52.offer.note=$('v52Note')?.value.trim()||'';
-  }
-  renderAssistant();
+function saveAssistantLead(){
+ if(!assistant.company)return;
+ const existing=state.leads.find(l=>l.company.toLowerCase()===assistant.company.toLowerCase());
+ const l=existing||{id:uid(),company:assistant.company};
+ Object.assign(l,{industry:assistant.industry,status:assistant.timing==="Abschluss heute"?"gewonnen":assistant.timing==="Rückruf vereinbaren"?"termin":"kontakt",tpv:assistant.tpv,provider:assistant.solution,product:productRecommendation().name,next:assistant.timing,due:today(),notes:`Sales Assistant: ${assistant.satisfaction}`});
+ if(!existing)state.leads.unshift(l);
+ if(assistant.timing==="Rückruf vereinbaren")state.tasks.unshift({id:uid(),title:"Rückruf vereinbaren",company:l.company,due:today(),done:false});
+ save();
 }
-
-
-function saveAssistantToCRM(action){
- let l=A.leadId?S.leads.find(x=>x.id===A.leadId):null;
- if(!l){
-   l={id:uid(),createdAt:new Date().toISOString(),company:A.company||'Unbenannter Lead',industry:A.industry||'Sonstiges',status:'kontaktiert',contact:'',phone:'',email:'',address:'',provider:'',terminal:'',product:'Noch offen',priority:'Hoch',need:'',next:'',due:'',notes:''};
-   S.leads.unshift(l);A.leadId=l.id;
- }
- l.industry=A.industry||l.industry;l.need=[A.solution&&'Aktuell: '+A.solution,A.satisfaction&&'Zufriedenheit: '+A.satisfaction,A.pain&&'Bedarf: '+A.pain,A.objection&&'Einwand: '+A.objection].filter(Boolean).join(' · ');
- l.notes=(l.notes?l.notes+'\n':'')+`Sales Assistant: ${action}.`;
- const map={'Abschluss heute':'gewonnen','Rückruf vereinbaren':'kontaktiert','Termin vereinbaren':'termin','Unterlagen / Info senden':'angebot','Entscheider kontaktieren':'kontaktiert','Kein Interesse':'verloren'};
- l.status=map[action]||l.status;
- l.next=action;
- if(['Rückruf vereinbaren','Termin vereinbaren','Entscheider kontaktieren'].includes(action))l.due=new Date().toISOString().slice(0,10);
- A.saved=true;localStorage.setItem(KEY,JSON.stringify(S));
- render();
+function openTask(id){
+ const t=state.tasks.find(x=>x.id===id)||{id:"",title:"",company:"",due:today(),done:false};
+ showModal(`<h2>${id?"Task bearbeiten":"Neue Aufgabe"}</h2><input id="t_title" placeholder="Aufgabe" value="${esc(t.title)}"><input id="t_company" placeholder="Firma" value="${esc(t.company)}"><input id="t_due" type="date" value="${esc(t.due)}"><button class="primary wide" onclick="saveTask('${id}')">Speichern</button>`);
 }
-
-$('locate').onclick=()=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>$('locStatus').textContent=`Standort: ${p.coords.latitude.toFixed(5)}, ${p.coords.longitude.toFixed(5)}`,()=>$('locStatus').textContent='Standortzugriff nicht erlaubt.'):alert('Standort wird nicht unterstützt.');
-function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click()}
-$('csv').onclick=()=>{const c=['company','industry','status','contact','phone','email','address','provider','terminal','product','priority','need','next','due','notes'];dl('nexaro-leads.csv','\ufeff'+[c.join(';'),...S.leads.map(l=>c.map(k=>`"${String(l[k]||'').replaceAll('"','""')}"`).join(';'))].join('\n'),'text/csv')};
-$('json').onclick=()=>dl('nexaro-crm-backup.json',JSON.stringify(S,null,2),'application/json');
-$('restore').onchange=e=>{const r=new FileReader();r.onload=()=>{try{S=JSON.parse(r.result);localStorage.setItem(KEY,JSON.stringify(S));render();alert('Backup wiederhergestellt.')}catch{alert('Ungültiges Backup.')}};r.readAsText(e.target.files[0])};
-$('demo').onclick=()=>{S.leads=[['Späti am Markt','Kiosk / Späti','neu','Halbe, Brandenburg','Solo','Heute anrufen'],['Getränke & Mehr','Getränkemarkt','kontaktiert','Lübben','Terminal','Mittwoch nachfassen'],['Mode & Alltag','Einzelhandel','termin','Luckau','Kassensystem / POS','Beratung vorbereiten']].map(x=>({id:uid(),company:x[0],industry:x[1],status:x[2],address:x[3],product:x[4],next:x[5],priority:'Hoch',due:new Date().toISOString().slice(0,10),notes:''}));save()};
-$('clear').onclick=()=>{if(confirm('Alle lokalen CRM-Daten löschen?')){S={leads:[]};save()}};
-render();renderAssistant();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
-/* =========================
-   neXaro Gebiet V2
-   Standort + PLZ + Radius
-   Unternehmen + Lead + Route
-   ========================= */
-
-let areaOrigin=null;
-let areaResults=[];
-
-const areaIndustryTags={
-  all:'[name][shop]',
-  bakery:'[shop=bakery]',
-  beverage:'[shop=beverages]',
-  retail:'[shop]',
-  gastronomy:'[amenity~"restaurant|cafe|bar|fast_food"]',
-  hairdresser:'[shop=hairdresser]',
-  craft:'[craft]',
-  kiosk:'[shop=convenience]',
-  fuel:'[amenity=fuel]'
-};
-
-function areaDistance(lat1,lon1,lat2,lon2){
-  const R=6371;
-  const p=Math.PI/180;
-  const a=
-    0.5-Math.cos((lat2-lat1)*p)/2+
-    Math.cos(lat1*p)*Math.cos(lat2*p)*
-    (1-Math.cos((lon2-lon1)*p))/2;
-  return R*2*Math.asin(Math.sqrt(a));
+function saveTask(id){const t={id:id||uid(),title:$("t_title").value.trim(),company:$("t_company").value.trim(),due:$("t_due").value,done:false};if(!t.title)return;const i=state.tasks.findIndex(x=>x.id===t.id);if(i>=0)state.tasks[i]=Object.assign(state.tasks[i],t);else state.tasks.push(t);closeModal();save()}
+window.saveTask=saveTask;
+function renderTasks(){
+ const arr=[...state.tasks].sort((a,b)=>Number(a.done)-Number(b.done)||a.due.localeCompare(b.due));
+ $("taskList").innerHTML=arr.map(t=>`<div class="lead-card"><div class="lead-top"><div><div class="lead-title">${esc(t.title)}</div><div class="meta">${esc(t.company||"Allgemein")} · ${esc(t.due)}</div></div><span class="badge ${t.done?"green":""}">${t.done?"Erledigt":"Offen"}</span></div><div class="lead-actions"><button onclick="toggleTask('${t.id}')">${t.done?"↩ Offen":"✓ Erledigt"}</button><button onclick="openTask('${t.id}')">✏️ Bearbeiten</button></div></div>`).join("")||`<div class="card">Keine Tasks.</div>`;
 }
+function toggleTask(id){const t=state.tasks.find(x=>x.id===id);if(t)t.done=!t.done;save()}
+window.toggleTask=toggleTask;window.openTask=openTask;
 
-function areaStatus(text){
-  const el=$('areaSearchStatus');
-  if(el)el.textContent=text;
+function renderMore(panel){
+ const box=$("morePanel");if(!panel){box.innerHTML="";return}
+ if(panel==="settings")box.innerHTML=`<div class="card internal"><h3>⚙️ Einstellungen</h3><p class="info">Daten werden lokal im Browser gespeichert. Für Team-/Cloudbetrieb ist später ein Backend erforderlich.</p><a href="https://www.sumup.com/de-de/preise/" target="_blank" rel="noopener">Aktuelle SumUp-Preise öffnen</a></div>`;
+ if(panel==="internal")renderInternal();
 }
-
-function areaLocationStatus(text){
-  const el=$('areaLocationStatus');
-  if(el)el.textContent=text;
+function renderInternal(){
+ const i=loadInternal();
+ $("morePanel").innerHTML=`<div class="card internal"><div class="eyebrow">🔒 NUR INTERN</div><h3>Provisions- & Deal-Kalkulation</h3>
+ <p class="info">Diese Daten werden niemals in der kundenorientierten Empfehlung angezeigt.</p>
+ <label>Profil<select id="ic_profile"><option value="partner">Partner</option><option value="agent">Agent</option></select></label>
+ <label>Nettomarge<input id="ic_margin" inputmode="decimal" value="${(i.netMargin*100).toFixed(2)}" placeholder="0,70"></label>
+ <label>Monatliches Kartenvolumen<input id="ic_tpv" inputmode="decimal" value="" placeholder="z. B. 15000"></label>
+ <label>Hardware-Verkaufspreis<input id="ic_hw" inputmode="decimal" value="" placeholder="z. B. 160"></label>
+ <label>Software-Jahrespreis<input id="ic_sw" inputmode="decimal" value="" placeholder="z. B. 588"></label>
+ <button id="calcInternal" class="primary wide">🧮 Intern berechnen</button><div id="internalResult"></div></div>`;
+ $("ic_profile").value=i.profile;
+ $("calcInternal").onclick=calculateInternal;
 }
-
-function setAreaOrigin(lat,lon,label){
-  areaOrigin={lat:Number(lat),lon:Number(lon),label};
-  areaLocationStatus('📍 '+label+' · '+Number(lat).toFixed(5)+', '+Number(lon).toFixed(5));
+function calculateInternal(){
+ const profile=$("ic_profile").value, margin=(Number($("ic_margin").value.replace(",","."))||.7)/100, tpv=Number($("ic_tpv").value.replace(",","."))||0, hw=Number($("ic_hw").value.replace(",","."))||0, sw=Number($("ic_sw").value.replace(",","."))||0;
+ localStorage.setItem(INTERNAL_KEY,JSON.stringify({profile,netMargin:margin}));
+ const share=profile==="partner"?.5:.4, residual=profile==="partner"?.2:0;
+ const activation=tpv>=500?200:0;
+ const annual=tpv*margin*12*share;
+ const hardware=hw*.5, software=sw*.5;
+ const day30=Math.max(0,annual-activation);
+ const day60=Math.max(0,annual-day30-activation);
+ const extras=(tpv>15000?100:0);
+ const immediate=activation+day30+day60+hardware+software+extras;
+ $("internalResult").innerHTML=`<div class="option"><b>Interne Schätzung</b><p>Aktivierungsbonus: ${money(activation)}</p><p>Payments annualisiert: ${money(annual)}</p><p>Hardware: ${money(hardware)}</p><p>Software: ${money(software)}</p><p>TPV-Master-Bonus: ${money(extras)}</p><p class="price">Gesamt sofort: ${money(immediate)}</p><p>Residual: ${money(tpv*margin*residual)}/Monat · maximal 24 Monate</p><div class="tip">Quelle: dein hinterlegtes Commission Scheme. Exakte Vertragsbedingungen gehen vor.</div></div>`;
 }
-
-async function areaGeocodePLZ(plz){
-  const url=
-    'https://nominatim.openstreetmap.org/search?format=jsonv2&country=Deutschland&postalcode='+
-    encodeURIComponent(plz)+'&limit=1';
-
-  const res=await fetch(url,{
-    headers:{'Accept':'application/json'}
-  });
-
-  if(!res.ok)throw new Error('PLZ-Suche fehlgeschlagen');
-
-  const data=await res.json();
-
-  if(!data.length)throw new Error('PLZ nicht gefunden');
-
-  return data[0];
+function useLocation(){
+ if(!navigator.geolocation)return alert("Standort wird nicht unterstützt.");
+ navigator.geolocation.getCurrentPosition(p=>{areaOrigin={lat:p.coords.latitude,lon:p.coords.longitude};$("areaStatus").textContent=`📍 Live-Standort · ${areaOrigin.lat.toFixed(5)}, ${areaOrigin.lon.toFixed(5)}`},()=>alert("Standortzugriff wurde nicht erlaubt."));
 }
-
-async function areaSearchCompanies(){
-  if(!areaOrigin){
-    alert('Bitte zuerst Live-Standort verwenden oder eine PLZ eingeben.');
-    return;
-  }
-
-  const radiusKm=Number($('areaRadius')?.value||5);
-  const industry=$('areaIndustry')?.value||'all';
-  const radius=Math.round(radiusKm*1000);
-
-  areaStatus('🔎 Suche Unternehmen im Umkreis von '+radiusKm+' km ...');
-
-  const tag=areaIndustryTags[industry]||'[name]';
-
-  const query=
-industry==='all'
-? `[out:json][timeout:30];
-(
-  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["shop"];
-  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["craft"];
-  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["amenity"~"restaurant|cafe|bar|fast_food|fuel"];
-);
-out center tags;`
-: `[out:json][timeout:30];
-(
-  nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})${tag};
-);
-out center tags;`;
-
-  try{
-    const res=await fetch(
-      'https://overpass-api.de/api/interpreter',
-      {
-        method:'POST',
-        body:query
-      }
-    );
-
-    if(!res.ok)throw new Error('Unternehmenssuche fehlgeschlagen');
-
-    const data=await res.json();
-
-    areaResults=(data.elements||[])
-      .map(x=>{
-        const lat=x.lat??x.center?.lat;
-        const lon=x.lon??x.center?.lon;
-        const name=x.tags?.name;
-
-        if(!lat||!lon||!name)return null;
-
-        const distance=areaDistance(
-          areaOrigin.lat,
-          areaOrigin.lon,
-          lat,
-          lon
-        );
-
-        const existing=S.leads.find(l=>
-          String(l.company||'').toLowerCase()===
-          String(name).toLowerCase()
-        );
-
-        let score=100-Math.min(45,distance*7);
-
-        if(existing)score-=30;
-
-        return{
-          id:String(x.type)+'_'+String(x.id),
-          name,
-          lat:Number(lat),
-          lon:Number(lon),
-          distance,
-          score:Math.max(20,Math.round(score)),
-          address:x.tags?.['addr:street']
-            ? (x.tags['addr:street']+' '+(x.tags['addr:housenumber']||''))
-            : '',
-          city:x.tags?.['addr:city']||'',
-          phone:x.tags?.phone||x.tags?.['contact:phone']||'',
-          website:x.tags?.website||'',
-          existing:!!existing
-        };
-      })
-      .filter(Boolean)
-      .sort((a,b)=>a.distance-b.distance)
-      .slice(0,50);
-
-    renderAreaResults();
-
-    areaStatus(
-      areaResults.length+
-      ' potenzielle Unternehmen gefunden.'
-    );
-
-  }catch(err){
-    console.error(err);
-    areaStatus('❌ Suche momentan nicht verfügbar.');
-    alert('Die Unternehmenssuche konnte gerade nicht durchgeführt werden. Bitte später erneut versuchen.');
-  }
+async function geocodePLZ(){
+ const p=$("plz").value.trim();if(!/^\d{5}$/.test(p))return null;
+ const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&country=Germany&postalcode=${p}&limit=1`,{headers:{Accept:"application/json"}});
+ const d=await r.json();return d[0]?{lat:Number(d[0].lat),lon:Number(d[0].lon)}:null;
 }
-
+async function searchArea(){
+ try{
+  if(!areaOrigin){areaOrigin=await geocodePLZ();if(areaOrigin)$("areaStatus").textContent=`📍 PLZ-Ausgangspunkt · ${areaOrigin.lat.toFixed(5)}, ${areaOrigin.lon.toFixed(5)}`;}
+  if(!areaOrigin)return alert("Bitte zuerst Live-Standort oder PLZ setzen.");
+  const radius=Number($("radius").value), ind=$("industry").value;
+  const tag={bakery:'["shop"="bakery"]',beverage:'["shop"="beverages"]',retail:'["shop"]',gastronomy:'["amenity"~"restaurant|cafe|bar|fast_food"]',hairdresser:'["shop"="hairdresser"]',craft:'["craft"]',kiosk:'["shop"="convenience"]',fuel:'["amenity"="fuel"]'}[ind];
+  const body=ind==="all"?`[out:json][timeout:30];(nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["shop"];nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["craft"];nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})["name"]["amenity"~"restaurant|cafe|bar|fast_food|fuel"];);out center tags;`:`[out:json][timeout:30];nwr(around:${radius},${areaOrigin.lat},${areaOrigin.lon})${tag};out center tags;`;
+  $("areaSearchStatus").textContent="Suche läuft…";
+  const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body});const data=await r.json();
+  areaCandidates=data.elements.map(e=>{const lat=e.lat??e.center?.lat,lon=e.lon??e.center?.lon,t=e.tags||{};return{name:t.name||"Unbenannt",lat,lon,address:[t["addr:street"],t["addr:housenumber"],t["addr:postcode"],t["addr:city"]].filter(Boolean).join(" "),distance:dist(areaOrigin.lat,areaOrigin.lon,lat,lon),phone:t.phone||t["contact:phone"]||"",website:t.website||""}}).filter(x=>x.lat&&x.lon).filter((x,i,a)=>a.findIndex(y=>y.name.toLowerCase()===x.name.toLowerCase()&&Math.abs(y.lat-x.lat)<.0001&&Math.abs(y.lon-x.lon)<.0001)===i).map(x=>{const exists=state.leads.some(l=>l.company.toLowerCase()===x.name.toLowerCase());return{...x,existing:exists,score:Math.max(20,Math.round(100-Math.min(45,x.distance/1000*7)-(exists?30:0)))}}).sort((a,b)=>b.score-a.score||a.distance-b.distance).slice(0,50);
+  renderAreaResults();$("areaSearchStatus").textContent=`${areaCandidates.length} potenzielle Unternehmen gefunden.`;
+ }catch(e){$("areaSearchStatus").textContent="Suche fehlgeschlagen. Bitte später erneut versuchen."}
+}
+function dist(a,b,c,d){const R=6371000,p=Math.PI/180,x=(c-a)*p,y=(d-b)*p;return 2*R*Math.asin(Math.sqrt(Math.sin(x/2)**2+Math.cos(a*p)*Math.cos(c*p)*Math.sin(y/2)**2))}
 function renderAreaResults(){
-  const el=$('areaList');
-  if(!el)return;
-
-  if(!areaResults.length){
-    el.innerHTML='<div class="info">Keine passenden Unternehmen gefunden.</div>';
-    return;
-  }
-
-  el.innerHTML=areaResults.map((x,i)=>`
-    <div class="card">
-      <strong>${esc(x.name)}</strong>
-      <div class="info">
-        📏 ${x.distance.toFixed(1)} km ·
-        🎯 Potenzial ${x.score}%
-      </div>
-      ${x.address||x.city
-        ? `<div class="info">📍 ${esc((x.address+' '+x.city).trim())}</div>`
-        : ''}
-      ${x.phone
-        ? `<div class="info">📞 ${esc(x.phone)}</div>`
-        : ''}
-      ${x.existing
-        ? `<div class="info">✓ Bereits im CRM</div>`
-        : `<button class="primary wide" onclick="areaAddLead(${i})">
-             ➕ Als Lead übernehmen
-           </button>`}
-      <button class="wide" onclick="areaAddRoute(${i})">
-        🗺️ Zur Route hinzufügen
-      </button>
-    </div>
-  `).join('');
+ $("areaResults").innerHTML=areaCandidates.map((x,i)=>`<div class="lead-card"><div class="lead-top"><div><div class="lead-title">${esc(x.name)}</div><div class="meta">${esc(x.address||"Adresse nicht verfügbar")} · ${(x.distance/1000).toFixed(1)} km</div></div><span class="badge orange">Potenzial ${x.score}%</span></div><div class="lead-actions"><button onclick="areaLead(${i})">＋ Als Lead</button><button onclick="areaRoute(${i})">🚗 Route</button></div></div>`).join("")||`<div class="info">Keine Treffer.</div>`;
 }
+function areaLead(i){const x=areaCandidates[i];if(state.leads.some(l=>l.company===x.name))return;state.leads.unshift({id:uid(),company:x.name,industry:$("industry").selectedOptions[0].text,status:"neu",address:x.address,phone:x.phone,tpv:0,product:"",notes:`Gebietspotenzial ${x.score}%`,next:"Erstkontakt",due:today()});save()}
+function areaRoute(i){route.push(areaCandidates[i]);route=uniqueRoute(route);renderRoute()}
+function uniqueRoute(a){return a.filter((x,i)=>a.findIndex(y=>y.name===x.name&&y.lat===x.lat&&y.lon===x.lon)===i)}
+function optimizeRoute(){if(!route.length)route=areaCandidates.slice(0,8);if(!route.length)return;let cur=areaOrigin||route[0];const remaining=[...route],ordered=[];while(remaining.length){remaining.sort((a,b)=>dist(cur.lat,cur.lon,a.lat,a.lon)-dist(cur.lat,cur.lon,b.lat,b.lon));const n=remaining.shift();ordered.push(n);cur=n}route=ordered;renderRoute()}
+function renderRoute(){$("routeResults").innerHTML=route.map((x,i)=>`<div class="route-stop"><div class="route-num">${i+1}</div><div><b>${esc(x.name)}</b><div class="meta">${esc(x.address||"")} · ${(x.distance/1000).toFixed(1)} km</div></div></div>`).join("")||"Noch keine Route."}
+function openMaps(){if(!route.length)return alert("Erst eine Route erstellen.");const pts=route.map(x=>`${x.lat},${x.lon}`);let url="https://www.google.com/maps/dir/?api=1";if(areaOrigin)url+=`&origin=${areaOrigin.lat},${areaOrigin.lon}`;url+=`&destination=${pts.at(-1)}&waypoints=${pts.slice(0,-1).join("|")}&travelmode=driving`;window.open(url,"_blank")}
 
-window.areaAddLead=function(i){
-  const x=areaResults[i];
-  if(!x)return;
+function showModal(html){$("modalContent").innerHTML=html;$("modal").classList.remove("hidden")}
+function closeModal(){$("modal").classList.add("hidden");$("modalContent").innerHTML=""}
+function download(name,text,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function exportCsv(){const cols=["company","industry","status","contact","phone","email","address","tpv","provider","product","next","due","notes"];const rows=[cols.join(";"),...state.leads.map(l=>cols.map(k=>`"${String(l[k]??"").replaceAll('"','""')}"`).join(";"))];download("nexaro-leads.csv","\ufeff"+rows.join("\n"),"text/csv;charset=utf-8")}
+function restoreJson(e){const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const x=JSON.parse(r.result);if(x.leads&&x.tasks){localStorage.setItem(KEY,JSON.stringify(x));location.reload()}else alert("Ungültiges Backup.")}catch{alert("Ungültiges Backup.")}};r.readAsText(f)}
+function demoData(){state.leads=[{id:uid(),company:"Späti am Markt",industry:"Kiosk / Späti",status:"neu",address:"Berlin",tpv:6500,provider:"Anderes Terminal",product:"Solo",next:"Erstkontakt",due:today(),notes:"Demo"},{id:uid(),company:"Kaffeehaus Mitte",industry:"Gastronomie",status:"termin",address:"Berlin",tpv:14000,provider:"Anderes Terminal",product:"Terminal",next:"Beratung",due:today(),notes:"Demo"}];state.tasks=[{id:uid(),title:"Kaffeehaus anrufen",company:"Kaffeehaus Mitte",due:today(),done:false}];save()}
 
-  const exists=S.leads.find(l=>
-    String(l.company||'').toLowerCase()===
-    String(x.name).toLowerCase()
-  );
-
-  if(exists){
-    alert('Dieses Unternehmen ist bereits im CRM.');
-    return;
-  }
-
-  const lead={
-    id:uid(),
-    createdAt:new Date().toISOString(),
-    company:x.name,
-    industry:$('areaIndustry')?.value||'',
-    status:'Neu',
-    phone:x.phone||'',
-    address:x.address||'',
-    city:x.city||'',
-    website:x.website||'',
-    lat:x.lat,
-    lon:x.lon,
-    notes:'Gebiet V2 · Potenzial '+x.score+'%',
-    next:'Gebiet'
-  };
-
-  S.leads.unshift(lead);
-  save();
-  render();
-
-  x.existing=true;
-  renderAreaResults();
-
-  alert('Lead wurde ins CRM übernommen. ✅');
-};
-
-window.areaAddRoute=function(i){
-  const x=areaResults[i];
-  if(!x)return;
-
-  const key='nexaro-route-v6';
-  let route=JSON.parse(localStorage.getItem(key)||'[]');
-
-  if(!route.some(r=>r.id===x.id)){
-    route.push(x);
-    localStorage.setItem(key,JSON.stringify(route));
-  }
-
-  renderRoute();
-};
-
-function renderRoute(){
-  const el=$('routeList');
-  if(!el)return;
-
-  const route=JSON.parse(
-    localStorage.getItem('nexaro-route-v6')||'[]'
-  );
-
-  if(!route.length){
-    el.textContent='Noch keine Route geplant.';
-    return;
-  }
-
-  el.innerHTML=route.map((x,i)=>`
-    <div>
-      <strong>${i+1}. ${esc(x.name)}</strong>
-      <span class="info"> · ${x.distance.toFixed(1)} km</span>
-    </div>
-  `).join('');
-}
-
-function optimizeAreaRoute(){
-  if(!areaOrigin){
-    alert('Bitte zuerst einen Startpunkt auswählen.');
-    return;
-  }
-
-  const key='nexaro-route-v6';
-  let route=JSON.parse(localStorage.getItem(key)||'[]');
-
-  if(!route.length){
-    alert('Bitte zuerst Unternehmen zur Route hinzufügen.');
-    return;
-  }
-
-  /* Nearest-Neighbour-Heuristik:
-     jeweils den nächstgelegenen noch offenen Besuch wählen. */
-  const remaining=[...route];
-  const optimized=[];
-  let current={lat:areaOrigin.lat,lon:areaOrigin.lon};
-
-  while(remaining.length){
-    let bestIndex=0;
-    let bestDistance=Infinity;
-
-    remaining.forEach((x,i)=>{
-      const d=areaDistance(
-        current.lat,
-        current.lon,
-        x.lat,
-        x.lon
-      );
-
-      if(d<bestDistance){
-        bestDistance=d;
-        bestIndex=i;
-      }
-    });
-
-    const next=remaining.splice(bestIndex,1)[0];
-    optimized.push(next);
-    current=next;
-  }
-
-  localStorage.setItem(key,JSON.stringify(optimized));
-  renderRoute();
-
-  const origin=
-    encodeURIComponent(areaOrigin.lat+','+areaOrigin.lon);
-
-  const destination=
-    encodeURIComponent(
-      optimized[optimized.length-1].lat+','+
-      optimized[optimized.length-1].lon
-    );
-
-  const waypoints=optimized
-    .slice(0,-1)
-    .map(x=>x.lat+','+x.lon)
-    .join('|');
-
-  const url=
-    'https://www.google.com/maps/dir/?api=1'+
-    '&origin='+origin+
-    '&destination='+destination+
-    (waypoints
-      ? '&waypoints='+encodeURIComponent(waypoints)
-      : '')+
-    '&travelmode=driving';
-
-  const el=$('routeList');
-
-  if(el){
-    el.innerHTML+=`
-      <br>
-      <button class="primary wide"
-        onclick="window.open('${url}','_blank')">
-        🚗 Optimierte Route in Google Maps öffnen
-      </button>
-    `;
-  }
-}
-
-$('locate').onclick=()=>{
-  if(!navigator.geolocation){
-    alert('Dieser Browser unterstützt keine Standortbestimmung.');
-    return;
-  }
-
-  areaLocationStatus('📍 Standort wird ermittelt ...');
-
-  navigator.geolocation.getCurrentPosition(
-    pos=>{
-      setAreaOrigin(
-        pos.coords.latitude,
-        pos.coords.longitude,
-        'Live-Standort'
-      );
-    },
-    ()=>{
-      areaLocationStatus('❌ Standort konnte nicht ermittelt werden.');
-      alert('Bitte den Standortzugriff für diese Website erlauben.');
-    },
-    {
-      enableHighAccuracy:true,
-      timeout:10000,
-      maximumAge:60000
-    }
-  );
-};
-
-$('areaSearch').onclick=areaSearchCompanies;
-
-$('areaPlz').onchange=async()=>{
-  const plz=$('areaPlz').value.trim();
-
-  if(!/^\d{5}$/.test(plz)){
-    areaLocationStatus('Bitte eine gültige 5-stellige PLZ eingeben.');
-    return;
-  }
-
-  areaLocationStatus('🔎 PLZ wird gesucht ...');
-
-  try{
-    const place=await areaGeocodePLZ(plz);
-
-    setAreaOrigin(
-      place.lat,
-      place.lon,
-      'PLZ '+plz
-    );
-
-  }catch(err){
-    areaLocationStatus('❌ PLZ nicht gefunden.');
-    alert('Diese PLZ konnte nicht gefunden werden.');
-  }
-};
-
-$('optimizeRoute').onclick=optimizeAreaRoute;
-
-renderRoute();
+if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
+renderAll();renderAssistant();
