@@ -23,6 +23,97 @@ const SUMUP={
     {name:'Terminal',price:'169 €*',fit:'Eigenständiges All-in-one-Gerät mit Bestell- und Kassenfunktionen',url:'https://www.sumup.com/de-de/terminal-kartenterminal/'}
   ]
 };
+const COMMISSION={
+  partner:{
+    paymentsShare:0.50,
+    hardwareShare:0.50,
+    softwareShare:0.50,
+    residualShare:0.20
+  },
+  agent:{
+    paymentsShare:0.40,
+    hardwareShare:0.40,
+    softwareShare:0.40,
+    residualShare:0
+  },
+
+  activationBonus:200,
+  activationTpv:500,
+
+  partnerBonusMonthly:150,
+
+  hardwareBonusShare:0.50,
+  softwareBonusShare:0.50,
+
+  contractsBonus:100,
+  posActivationBonus:100,
+
+  tpvMasterBonus:100,
+  tpvMasterThreshold:15000,
+
+  kassensystemChampionBonus:100,
+
+  residualMonths:24,
+
+  defaultNetMargin:0.007
+};
+function calculateCommission(){
+  const tpv=Number($('monthlyTpv')?.value||$('expectedTpv')?.value||0);
+  const terminals=Number($('terminalCount')?.value||1);
+  const users=Number($('users')?.value||1);
+  const needsPos=$('needsPos')?.value==='ja';
+  const needsSoftware=$('needsSoftware')?.value==='ja';
+
+  const paymentsCommission=
+    tpv*COMMISSION.defaultNetMargin*12*COMMISSION.partner.paymentsShare;
+
+  const activation=
+    tpv>=COMMISSION.activationTpv
+    ? COMMISSION.activationBonus
+    : 0;
+
+  const hardwareCommission=
+    terminals*COMMISSION.hardwareBonusShare*169;
+
+  const softwareCommission=
+    needsSoftware
+    ? 49*12*COMMISSION.softwareBonusShare
+    : 0;
+
+  const bonuses=
+    (needsPos?COMMISSION.posActivationBonus:0)+
+    (needsSoftware?COMMISSION.contractsBonus:0)+
+    (tpv>=COMMISSION.tpvMasterThreshold?COMMISSION.tpvMasterBonus:0)+
+    (needsSoftware&&tpv>=COMMISSION.tpvMasterThreshold
+      ?COMMISSION.kassensystemChampionBonus
+      :0);
+
+  const residual=
+    tpv*COMMISSION.defaultNetMargin*
+    COMMISSION.partner.residualShare;
+
+  const totalImmediate=
+    paymentsCommission+
+    activation+
+    hardwareCommission+
+    softwareCommission+
+    bonuses;
+
+  return{
+    tpv,
+    terminals,
+    users,
+    needsPos,
+    needsSoftware,
+    paymentsCommission,
+    activation,
+    hardwareCommission,
+    softwareCommission,
+    bonuses,
+    residual,
+    totalImmediate
+  };
+}
 function sumupTariffHtml(){return `<div class="tariff-card"><div class="assistant-label">SUMUP DEUTSCHLAND 🇩🇪 · TARIF-CHECK</div><h3>Aktueller Preisstand</h3><div class="tariff-grid"><div><b>Umsatzbasiert</b><strong>${SUMUP.payg.rate}</strong><small>${SUMUP.payg.monthly}/Monat</small></div><div><b>Zahlungen Plus</b><strong>${SUMUP.plus.rate}</strong><small>${SUMUP.plus.monthly}/Monat · ${SUMUP.plus.yearly}/Jahr</small></div></div><p class="meta">Verifiziert am ${SUMUP.verified}. Nur deutsche SumUp-Konditionen (${SUMUP.sourceDomain}). ${SUMUP.plus.note}</p><a class="official-link" href="${SUMUP.pricesUrl}" target="_blank" rel="noopener">↗ Offizielle SumUp-Preise prüfen</a></div>`}
 function productHtml(name){const p=SUMUP.products.find(x=>x.name===name);if(!p)return '';return `<div class="product-card"><div><b>Passender SumUp-Ansatz</b><h4>${p.name}</h4><div class="meta">${p.fit}</div></div><strong>${p.price}</strong><a class="official-link" href="${p.url}" target="_blank" rel="noopener">↗ Produktdetails bei SumUp</a></div>`}
 function fitHtml(){
