@@ -336,6 +336,7 @@ function renderAssistant(){
   if(A.step===3)html+=step3();
   if(A.step===4)html+=step4();
   if(A.step===5)html+=step5();
+  if(A.step===6)html=step6();
   root.innerHTML=html+'</div>';
   root.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>assistantAction(b.dataset.a,b.dataset.v||''));
 }
@@ -464,49 +465,77 @@ function step3(){
 }
 
 function step4(){
- const ob=A.objection||'';
- if(ob)return `<div class="assistant-card"><div class="assistant-label">Schritt 4 · Einwandbehandlung</div><h3>${esc(ob)}</h3><div class="script"><b>Antwort:</b><br>${esc(objections[ob].say)}</div><div class="question">Danach fragen:</div><div class="script">${esc(objections[ob].ask)}</div>${A.pain?`<div class="tip"><b>Zurück zum Bedarf:</b> ${esc(nextQuestion())}</div>`:''}<div class="assistant-actions"><button class="primary" data-a="close">Zum Abschluss →</button><button data-a="clearObjection">Anderen Einwand</button></div></div>`;
- return `<div class="assistant-card"><div class="assistant-label">Schritt 4 · Einwandbehandlung</div><h3>Kommt ein Einwand?</h3><p class="tip">Grundregel: <b>zuhören → bestätigen → konkretisieren → antworten → zurück zum Abschluss.</b></p>
- <div class="choice-grid two">${Object.keys(objections).map(x=>`<button class="choice" data-a="objection" data-v="${x}">${x}</button>`).join('')}</div>
- <div class="assistant-actions"><button class="primary" data-a="close">Kein Einwand – zum Abschluss →</button></div></div>`;
+  return `<div class="assistant-card">
+    <div class="assistant-label">NE XARO · QUALIFIZIERUNG</div>
+    <h3>Wie hoch ist ungefähr Ihr monatliches Kartenzahlungsvolumen?</h3>
+    <div class="choice-grid">
+      <button class="primary" data-a="tpv" data-v="4999">Unter 5.000 €</button>
+      <button class="primary" data-a="tpv" data-v="5000">5.000–9.999 €</button>
+      <button class="primary" data-a="tpv" data-v="10000">10.000–14.999 €</button>
+      <button class="primary" data-a="tpv" data-v="15000">15.000–19.999 €</button>
+      <button class="primary" data-a="tpv" data-v="20000">20.000 € und mehr</button>
+    </div>
+    <div class="tip">
+      <b>Warum frage ich das?</b><br>
+      Damit wir die passende SumUp-Lösung anhand des Zahlungsvolumens empfehlen können.
+    </div>
+  </div>`;
 }
 
 function step5(){
- return `<div class="assistant-card result"><div class="assistant-label">Schritt 5 · Abschluss & CRM</div><h3>Was ist der nächste Schritt?</h3>
- <div class="choice-grid">${['Abschluss heute','Rückruf vereinbaren','Termin vereinbaren','Unterlagen / Info senden','Entscheider kontaktieren','Kein Interesse'].map(x=>`<button class="choice" data-a="finish" data-v="${x}">${x}</button>`).join('')}</div>
- ${A.timing?`<div class="saved">✓ ${esc(A.timing)}${A.saved?' · CRM gespeichert':''}</div>`:''}
- ${A.timing&&['Abschluss heute','Unterlagen / Info senden'].includes(A.timing)?offerHtml():''}
- <div class="tip" style="margin-top:12px">Abschlussformulierung: „Nach dem, was Sie mir gerade erzählt haben, sehe ich bei Ihnen grundsätzlich einen sinnvollen Ansatz. Lassen Sie uns das einmal konkret durchgehen. Wenn es für Sie nicht passt, lassen wir es dabei.“</div></div>`;
+  const ob=A.objection||'';
+
+  if(ob){
+    return `<div class="assistant-card">
+      <div class="assistant-label">NE XARO · EINWAND</div>
+      <h3>Einwand: ${esc(ob)}</h3>
+      <div class="tip">
+        <b>Sales Coach</b><br>
+        Verstehen, konkretisieren und erst danach die passende Lösung anbieten.
+      </div>
+      <div class="assistant-actions">
+        <button class="primary" data-a="clearObjection">Anderen Einwand wählen</button>
+        <button class="primary" data-a="close">Weiter zum Abschluss</button>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="assistant-card">
+    <div class="assistant-label">NE XARO · EINWAND</div>
+    <h3>Gibt es noch einen Einwand oder eine offene Frage?</h3>
+    <div class="choice-grid two">
+      ${Object.keys(objections).map(v=>`<button class="choice" data-a="objection" data-v="${esc(v)}">${esc(v)}</button>`).join('')}
+    </div>
+    <div class="assistant-actions">
+      <button class="primary" data-a="close">Keine offenen Einwände – zum Abschluss</button>
+    </div>
+  </div>`;
+}
+function assistantAction(a,v){
+  if(a==='step1next'){
+    const c=document.querySelector('[data-field="company"]');
+    if(c)A.company=c.value.trim();
+  }
+  if(a==='solution'){A.solution=v;A.step=3}
+  if(a==='satisfaction'){A.satisfaction=v}
+  if(a==='pain'){A.pain=v}
+  if(a==='calcCosts'){readCostFields()}
+  if(a==='next3')A.step=4
+  if(a==='tpv'){A.tpv=v;A.step=5}
+  if(a==='objection')A.objection=v
+  if(a==='clearObjection')A.objection=''
+  if(a==='close')A.step=6
+  if(a==='finish'){A.timing=v;saveAssistantToCRM(v)}
+  if(a==='sendOffer'){
+    V52.offer.customer=$('v52Customer')?.value.trim()||'';
+    V52.offer.email=$('v52Email')?.value.trim()||'';
+    V52.offer.product=$('v52Product')?.value||recommendedProduct();
+    V52.offer.discount=$('v52Discount')?.value||'0';
+    V52.offer.note=$('v52Note')?.value.trim()||'';
+  }
+  renderAssistant();
 }
 
-function assistantAction(a,v){
- if(a==='step1next'){
-   const c=document.querySelector('[data-field="company"]'),i=document.querySelector('[data-field="industry"]');A.company=c?.value.trim()||'';A.industry=i?.value||Object.keys(openings)[0];A.step=2;
- }
- if(a==='solution'){A.solution=v;A.step=3}
- if(a==='satisfaction'){A.satisfaction=v}
- if(a==='pain'){A.pain=v}
- if(a==='calcCosts'){readCostFields()}
- if(a==='next3')A.step=4;
- if(a==='objection')A.objection=v;
- if(a==='clearObjection')A.objection='';
- if(a==='close')A.step=5;
- if(a==='finish'){A.timing=v;saveAssistantToCRM(v)}
- if(a==='sendOffer'){
-   V52.offer.customer=$('v52Customer')?.value.trim()||A.company||'Ihr Ansprechpartner';
-   V52.offer.email=$('v52Email')?.value.trim()||'';
-   V52.offer.product=$('v52Product')?.value||recommendedProduct();
-   V52.offer.discount=$('v52Discount')?.value||'0';
-   V52.offer.note=$('v52Note')?.value.trim()||'Vielen Dank für das Gespräch.';
-   if(!V52.offer.email){alert('Bitte zuerst die E-Mail-Adresse des Kunden eingeben.');return}
-   const p=V52.offer.product,d=hardwareDiscount(p),base=hardwareBase(p),excluded=['Kassenschublade','Handscanner','Epson-Drucker'].includes(p),price=hardwarePrice(p),c=calcCosts();
-   const saving=c.t?Math.max(0,c.saving):0;
-   const body=[`Hallo ${V52.offer.customer},`,'','vielen Dank für das Gespräch.','','Wie besprochen, hier die Eckdaten Ihres individuellen SumUp-Angebots über neXaro Solutions:','',`Empfohlene Hardware: ${p}`,excluded?'Hardware-Rabatt: nicht anwendbar (ausgenommen von der Rabattregel).':`Hardwarepreis nach ${d}% Rabatt: ${euro(price)}${base?' (regulär '+euro(base)+')':''}`,'','Rabattregel: Bis zu 25 % auf rabattfähige SumUp-Hardware. Ausgenommen sind Kassenschublade, Handscanner und Epson-Drucker.','','SumUp Deutschland:','Umsatzbasiert: 1,39 % pro Zahlung, 0 € monatliche Grundgebühr.','Zahlungen Plus: 0,79 % für passende Vor-Ort-Zahlungen, 19 € pro Monat bzw. 199 € pro Jahr.',c.t?`Kostenvergleich auf Basis Ihrer Angaben: aktuell ca. ${euro(c.current)} / Monat · passende SumUp-Option ca. ${euro(c.best)} / Monat · Potenzial ca. ${euro(saving)} / Monat.`:'Kostenvergleich: Noch keine aktuellen Kosten eingegeben.','',V52.offer.note,'','Die finalen Konditionen richten sich nach dem aktuellen SumUp-Angebot und den jeweiligen Zahlungsarten.','','Viele Grüße','neXaro Solutions'].join('\n');
-   window.location.href=`mailto:${encodeURIComponent(V52.offer.email)}?subject=${encodeURIComponent(V52.emailSubject)}&body=${encodeURIComponent(body)}`;
-   return;
- }
- renderAssistant();
-}
 
 function saveAssistantToCRM(action){
  let l=A.leadId?S.leads.find(x=>x.id===A.leadId):null;
