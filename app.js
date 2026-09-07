@@ -517,7 +517,7 @@ function assistantAction(a,v){
   if(c)A.company=c.value.trim();
   A.step=2;
 }
-  }
+  
   if(a==='solution'){A.solution=v;A.step=3}
   if(a==='satisfaction'){A.satisfaction=v}
   if(a==='pain'){A.pain=v}
