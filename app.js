@@ -512,9 +512,11 @@ function step5(){
   </div>`;
 }
 function assistantAction(a,v){
-  if(a==='step1next'){
-    const c=document.querySelector('[data-field="company"]');
-    if(c)A.company=c.value.trim();
+ if(a==='step1next'){
+  const c=document.querySelector('[data-field="company"]');
+  if(c)A.company=c.value.trim();
+  A.step=2;
+}
   }
   if(a==='solution'){A.solution=v;A.step=3}
   if(a==='satisfaction'){A.satisfaction=v}
