@@ -114,6 +114,95 @@ function calculateCommission(){
     totalImmediate
   };
 }
+function tariffCommissionRecommendationHtml(){
+  const c=calculateCommission();
+
+  const tpv=c.tpv||0;
+  const terminals=c.terminals||1;
+  const users=c.users||1;
+  const needsPos=c.needsPos;
+  const needsSoftware=c.needsSoftware;
+
+  let tariff='Umsatzbasiertes Zahlen';
+  let reason='Für kleinere bzw. flexible Zahlungsvolumen ist dieser Tarif die einfachste Lösung.';
+
+  if(tpv>=3500){
+    tariff='Zahlungen Plus';
+    reason='Ab diesem Zahlungsvolumen ist Zahlungen Plus grundsätzlich prüfenswert, weil die Transaktionsgebühr niedriger ist.';
+  }
+
+  let solution='Tap to Pay';
+
+  if(terminals>=1){
+    solution=terminals>=2?'Terminal / mehrere Terminals':'Terminal';
+  }
+
+  if(needsPos){
+    solution='SumUp Kasse + Terminal';
+  }else if(needsSoftware){
+    solution='SumUp Software + Terminal';
+  }
+
+  let strategy=[];
+
+  if(needsPos){
+    strategy.push('Kassensystem einplanen');
+    strategy.push('POS-Aktivierungsbonus berücksichtigen');
+  }
+
+  if(needsSoftware){
+    strategy.push('Softwareumsatz berücksichtigen');
+  }
+
+  if(terminals>0){
+    strategy.push(terminals+' Hardware'+(terminals>1?'-Einheiten':'-Einheit')+' einplanen');
+  }
+
+  if(tpv>=COMMISSION.tpvMasterThreshold){
+    strategy.push('TPV-Master-Bonus prüfen');
+    if(needsSoftware) strategy.push('Kassensystem-Champion-Bonus prüfen');
+  }
+
+  strategy.push('Aktivierungsbonus ab 500 € TPV prüfen');
+
+  return `
+    <div class="recommendation">
+      <div class="assistant-label">💰 neXaro Provisions-Empfehlung</div>
+
+      <h3>${esc(tariff)}</h3>
+
+      <div class="tip">
+        <b>Kundensituation:</b><br>
+        ${tpv.toLocaleString('de-DE')} € Kartenumsatz / Monat ·
+        ${users} Nutzer ·
+        ${terminals} Terminal${terminals!==1?'s':''}
+      </div>
+
+      <div class="tip">
+        <b>Empfohlene Lösung:</b><br>
+        ${esc(solution)}
+      </div>
+
+      <div class="tip">
+        <b>Warum dieser Tarif?</b><br>
+        ${esc(reason)}
+      </div>
+
+      <div class="tip">
+        <b>Provisionsstrategie:</b><br>
+        ${strategy.map(x=>'• '+esc(x)).join('<br>')}
+      </div>
+
+      <div class="tip">
+        <b>Voraussichtliche Provision aus den aktuellen Angaben:</b><br>
+        ${c.totalImmediate.toLocaleString('de-DE',{style:'currency',currency:'EUR'})}
+        sofortig<br>
+        ${c.residual.toLocaleString('de-DE',{style:'currency',currency:'EUR'})}
+        Residual pro Monat
+      </div>
+    </div>
+  `;
+}
 function sumupTariffHtml(){return `<div class="tariff-card"><div class="assistant-label">SUMUP DEUTSCHLAND 🇩🇪 · TARIF-CHECK</div><h3>Aktueller Preisstand</h3><div class="tariff-grid"><div><b>Umsatzbasiert</b><strong>${SUMUP.payg.rate}</strong><small>${SUMUP.payg.monthly}/Monat</small></div><div><b>Zahlungen Plus</b><strong>${SUMUP.plus.rate}</strong><small>${SUMUP.plus.monthly}/Monat · ${SUMUP.plus.yearly}/Jahr</small></div></div><p class="meta">Verifiziert am ${SUMUP.verified}. Nur deutsche SumUp-Konditionen (${SUMUP.sourceDomain}). ${SUMUP.plus.note}</p><a class="official-link" href="${SUMUP.pricesUrl}" target="_blank" rel="noopener">↗ Offizielle SumUp-Preise prüfen</a></div>`}
 function productHtml(name){const p=SUMUP.products.find(x=>x.name===name);if(!p)return '';return `<div class="product-card"><div><b>Passender SumUp-Ansatz</b><h4>${p.name}</h4><div class="meta">${p.fit}</div></div><strong>${p.price}</strong><a class="official-link" href="${p.url}" target="_blank" rel="noopener">↗ Produktdetails bei SumUp</a></div>`}
 function fitHtml(){
